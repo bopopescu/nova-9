@@ -835,6 +835,8 @@ class InstanceTaskState(BaseNovaEnum):
     IMAGE_PENDING_UPLOAD = 'image_pending_upload'
     IMAGE_UPLOADING = 'image_uploading'
     IMAGE_BACKUP = 'image_backup'
+    MEMORY_SNAPSHOTS = 'memory_snapshots'
+    RESTORE_MEMORY_SNAPSHOTS = 'restore_memory_snapshots'
     UPDATING_PASSWORD = 'updating_password'
     RESIZE_PREP = 'resize_prep'
     RESIZE_MIGRATING = 'resize_migrating'
@@ -879,7 +881,7 @@ class InstanceTaskState(BaseNovaEnum):
            RESCUING, UNRESCUING, REBUILDING, REBUILD_BLOCK_DEVICE_MAPPING,
            REBUILD_SPAWNING, MIGRATING, DELETING, SOFT_DELETING, RESTORING,
            SHELVING, SHELVING_IMAGE_PENDING_UPLOAD, SHELVING_IMAGE_UPLOADING,
-           SHELVING_OFFLOADING, UNSHELVING)
+           SHELVING_OFFLOADING, UNSHELVING, MEMORY_SNAPSHOTS, RESTORE_MEMORY_SNAPSHOTS)
 
 
 class InstancePowerState(Enum):
