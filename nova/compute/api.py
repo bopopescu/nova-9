@@ -823,7 +823,7 @@ class API(base.Base):
                                          metadata, access_ip_v4, access_ip_v6,
                                          requested_networks, config_drive,
                                          auto_disk_config, reservation_id,
-                                         max_count):
+                                         max_count, ics_node):
         """Verify all the input parameters regardless of the provisioning
         strategy being performed.
         """
@@ -930,7 +930,8 @@ class API(base.Base):
             'progress': 0,
             'pci_requests': pci_request_info,
             'numa_topology': numa_topology,
-            'system_metadata': system_metadata}
+            'system_metadata': system_metadata,
+            'ics_node': ics_node}
 
         options_from_image = self._inherit_properties_from_image(
                 boot_meta, auto_disk_config)
@@ -975,6 +976,7 @@ class API(base.Base):
                 # Create an instance object, but do not store in db yet.
                 instance = objects.Instance(context=context)
                 instance.uuid = instance_uuid
+                instance.ics_node = base_options['ics_node']
                 instance.update(base_options)
                 instance.keypairs = objects.KeyPairList(objects=[])
                 if key_pair:
@@ -1151,7 +1153,8 @@ class API(base.Base):
                admin_password, access_ip_v4, access_ip_v6,
                requested_networks, config_drive,
                block_device_mapping, auto_disk_config, filter_properties,
-               reservation_id=None, legacy_bdm=True, shutdown_terminate=False,
+               reservation_id=None, ics_node=None,
+               legacy_bdm=True, shutdown_terminate=False,
                check_server_group_quota=False):
         """Verify all the input parameters regardless of the provisioning
         strategy being performed and schedule the instance(s) for
@@ -1183,7 +1186,7 @@ class API(base.Base):
                     key_name, key_data, security_groups, availability_zone,
                     user_data, metadata, access_ip_v4, access_ip_v6,
                     requested_networks, config_drive, auto_disk_config,
-                    reservation_id, max_count)
+                    reservation_id, max_count, ics_node)
 
         # max_net_count is the maximum number of instances requested by the
         # user adjusted for any network quota constraints, including
@@ -1574,7 +1577,7 @@ class API(base.Base):
                key_name=None, key_data=None, security_groups=None,
                availability_zone=None, forced_host=None, forced_node=None,
                user_data=None, metadata=None, injected_files=None,
-               admin_password=None, block_device_mapping=None,
+               admin_password=None, block_device_mapping=None, ics_node=None,
                access_ip_v4=None, access_ip_v6=None, requested_networks=None,
                config_drive=None, auto_disk_config=None, scheduler_hints=None,
                legacy_bdm=True, shutdown_terminate=False,
@@ -1614,6 +1617,7 @@ class API(base.Base):
                        access_ip_v4, access_ip_v6,
                        requested_networks, config_drive,
                        block_device_mapping, auto_disk_config,
+                       ics_node=ics_node,
                        filter_properties=filter_properties,
                        legacy_bdm=legacy_bdm,
                        shutdown_terminate=shutdown_terminate,

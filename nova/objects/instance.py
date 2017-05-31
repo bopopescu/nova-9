@@ -51,7 +51,7 @@ _INSTANCE_OPTIONAL_JOINED_FIELDS = ['metadata', 'system_metadata',
 _INSTANCE_OPTIONAL_NON_COLUMN_FIELDS = ['fault', 'flavor', 'old_flavor',
                                         'new_flavor', 'ec2_ids']
 # These are fields that are optional and in instance_extra
-_INSTANCE_EXTRA_FIELDS = ['numa_topology', 'pci_requests',
+_INSTANCE_EXTRA_FIELDS = ['numa_topology', 'pci_requests', 'ics_node',
                           'flavor', 'vcpu_model', 'migration_context',
                           'keypairs', 'device_metadata']
 # These are fields that applied/drooped by migration_context
@@ -139,6 +139,7 @@ class Instance(base.NovaPersistentObject, base.NovaObject,
 
         'host': fields.StringField(nullable=True),
         'node': fields.StringField(nullable=True),
+        'ics_node': fields.StringField(nullable=True),
 
         'instance_type_id': fields.IntegerField(nullable=True),
 
