@@ -550,6 +550,12 @@ class ServersController(wsgi.Controller):
         # Arguments to be passed to instance create function
         create_kwargs = {}
 
+        # ics_node for buiid the instance
+        if body.haskey('ics_node'):
+            ics_node = body['ics_node']
+        else:
+            ics_node = None
+
         # Query extensions which want to manipulate the keyword
         # arguments.
         # NOTE(cyeoh): This is the hook that extensions use
@@ -637,7 +643,7 @@ class ServersController(wsgi.Controller):
                             availability_zone=availability_zone,
                             forced_host=host, forced_node=node,
                             metadata=server_dict.get('metadata', {}),
-                            admin_password=password,
+                            admin_password=password, ics_node=ics_node,
                             requested_networks=requested_networks,
                             check_server_group_quota=True,
                             **create_kwargs)
