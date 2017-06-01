@@ -509,6 +509,20 @@ class ComputeAPI(object):
                           instance=instance, migration=migration,
                           reservations=reservations)
 
+    def confirm_live_resize(self, ctxt, instance, migration, host,
+            reservations=None, cast=True):
+        version = '4.0'
+        if not host:
+            client = self.router.by_instance(ctxt, instance)
+        else:
+            client = self.router.by_host(ctxt, host)
+        cctxt = client.prepare(
+                server=_compute_host(host, instance), version=version)
+        rpc_method = cctxt.cast if cast else cctxt.call
+        return rpc_method(ctxt, 'confirm_live_resize',
+                          instance=instance, migration=migration,
+                          reservations=reservations)
+
     def detach_interface(self, ctxt, instance, port_id):
         version = '4.0'
         cctxt = self.router.by_instance(ctxt, instance).prepare(
@@ -534,6 +548,15 @@ class ComputeAPI(object):
         cctxt = self.router.by_host(ctxt, host).prepare(
                 server=host, version=version)
         cctxt.cast(ctxt, 'finish_resize',
+                   instance=instance, migration=migration,
+                   image=image, disk_info=disk_info, reservations=reservations)
+
+    def finish_live_resize(self, ctxt, instance, migration, image, disk_info,
+            host, reservations=None):
+        version = '4.0'
+        cctxt = self.router.by_host(ctxt, host).prepare(
+                server=host, version=version)
+        cctxt.cast(ctxt, 'finish_live_resize',
                    instance=instance, migration=migration,
                    image=image, disk_info=disk_info, reservations=reservations)
 
@@ -752,6 +775,28 @@ class ComputeAPI(object):
         cctxt = client.prepare(server=host, version=version)
         cctxt.cast(ctxt, 'prep_resize', **msg_args)
 
+    def prep_live_resize(self, ctxt, instance, image, instance_type, host,
+                    reservations=None, request_spec=None,
+                    filter_properties=None, node=None,
+                    clean_shutdown=True):
+        image_p = jsonutils.to_primitive(image)
+        msg_args = {'instance': instance,
+                    'instance_type': instance_type,
+                    'image': image_p,
+                    'reservations': reservations,
+                    'request_spec': request_spec,
+                    'filter_properties': filter_properties,
+                    'node': node,
+                    'clean_shutdown': clean_shutdown}
+        version = '4.1'
+        client = self.router.by_host(ctxt, host)
+        if not client.can_send_version(version):
+            version = '4.0'
+            msg_args['instance_type'] = objects_base.obj_to_primitive(
+                                            instance_type)
+        cctxt = client.prepare(server=host, version=version)
+        cctxt.cast(ctxt, 'prep_live_resize', **msg_args)
+
     def reboot_instance(self, ctxt, instance, block_device_info,
                         reboot_type):
         version = '4.0'
@@ -858,6 +903,23 @@ class ComputeAPI(object):
         cctxt = client.prepare(server=_compute_host(None, instance),
                 version=version)
         cctxt.cast(ctxt, 'resize_instance', **msg_args)
+
+    def live_resize_instance(self, ctxt, instance, migration, image, instance_type,
+                        reservations=None, clean_shutdown=True):
+        msg_args = {'instance': instance, 'migration': migration,
+                    'image': image, 'reservations': reservations,
+                    'instance_type': instance_type,
+                    'clean_shutdown': clean_shutdown,
+        }
+        version = '4.1'
+        client = self.router.by_instance(ctxt, instance)
+        if not client.can_send_version(version):
+            msg_args['instance_type'] = objects_base.obj_to_primitive(
+                                            instance_type)
+            version = '4.0'
+        cctxt = client.prepare(server=_compute_host(None, instance),
+                version=version)
+        cctxt.cast(ctxt, 'live_resize_instance', **msg_args)
 
     def resume_instance(self, ctxt, instance):
         version = '4.0'

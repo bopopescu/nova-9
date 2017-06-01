@@ -32,6 +32,7 @@ from nova.compute.utils import wrap_instance_event
 from nova.compute import vm_states
 from nova.conductor.tasks import live_migrate
 from nova.conductor.tasks import migrate
+from nova.conductor.tasks import live_resize
 from nova import context as nova_context
 from nova.db import base
 from nova import exception
@@ -251,6 +252,37 @@ class ComputeTaskManager(base.Base):
         else:
             raise NotImplementedError()
 
+    @wrap_instance_event(prefix='conductor')
+    def live_resize_instance(self, context, instance, scheduler_hint, live, rebuild,
+            flavor, block_migration, disk_over_commit, reservations=None,
+            clean_shutdown=True, request_spec=None):
+        if instance and not isinstance(instance, nova_object.NovaObject):
+            # NOTE(danms): Until v2 of the RPC API, we need to tolerate
+            # old-world instance objects here
+            attrs = ['metadata', 'system_metadata', 'info_cache',
+                     'security_groups']
+            instance = objects.Instance._from_db_object(
+                context, objects.Instance(), instance,
+                expected_attrs=attrs)
+        # NOTE: Remove this when we drop support for v1 of the RPC API
+        if flavor and not isinstance(flavor, objects.Flavor):
+            # Code downstream may expect extra_specs to be populated since it
+            # is receiving an object, so lookup the flavor to ensure this.
+            flavor = objects.Flavor.get_by_id(context, flavor['id'])
+        if live and not rebuild and not flavor:
+            self._live_migrate(context, instance, scheduler_hint,
+                               block_migration, disk_over_commit, request_spec)
+        elif not live and not rebuild and flavor:
+            instance_uuid = instance.uuid
+            with compute_utils.EventReporter(context, 'cold_migrate',
+                                             instance_uuid):
+                self._live_resize_instance(context, instance, flavor,
+                                   scheduler_hint['filter_properties'],
+                                   reservations, clean_shutdown, request_spec)
+        else:
+            raise NotImplementedError()
+
+
     def _cold_migrate(self, context, instance, flavor, filter_properties,
                       reservations, clean_shutdown, request_spec):
         image = utils.get_image_from_system_metadata(
@@ -273,6 +305,71 @@ class ComputeTaskManager(base.Base):
             request_spec.flavor = flavor
 
         task = self._build_cold_migrate_task(context, instance, flavor,
+                                             request_spec,
+                                             reservations, clean_shutdown)
+        # TODO(sbauza): Provide directly the RequestSpec object once
+        # _set_vm_state_and_notify() accepts it
+        legacy_spec = request_spec.to_legacy_request_spec_dict()
+        try:
+            task.execute()
+        except exception.NoValidHost as ex:
+            vm_state = instance.vm_state
+            if not vm_state:
+                vm_state = vm_states.ACTIVE
+            updates = {'vm_state': vm_state, 'task_state': None}
+            self._set_vm_state_and_notify(context, instance.uuid,
+                                          'migrate_server',
+                                          updates, ex, legacy_spec)
+
+            # if the flavor IDs match, it's migrate; otherwise resize
+            if flavor.id == instance.instance_type_id:
+                msg = _("No valid host found for cold migrate")
+            else:
+                msg = _("No valid host found for resize")
+            raise exception.NoValidHost(reason=msg)
+        except exception.UnsupportedPolicyException as ex:
+            with excutils.save_and_reraise_exception():
+                vm_state = instance.vm_state
+                if not vm_state:
+                    vm_state = vm_states.ACTIVE
+                updates = {'vm_state': vm_state, 'task_state': None}
+                self._set_vm_state_and_notify(context, instance.uuid,
+                                              'migrate_server',
+                                              updates, ex, legacy_spec)
+        except Exception as ex:
+            with excutils.save_and_reraise_exception():
+                updates = {'vm_state': instance.vm_state,
+                           'task_state': None}
+                self._set_vm_state_and_notify(context, instance.uuid,
+                                              'migrate_server',
+                                              updates, ex, legacy_spec)
+        # NOTE(sbauza): Make sure we persist the new flavor in case we had
+        # a successful scheduler call if and only if nothing bad happened
+        if request_spec.obj_what_changed():
+            request_spec.save()
+
+    def _live_resize_instance(self, context, instance, flavor, filter_properties,
+                      reservations, clean_shutdown, request_spec):
+        image = utils.get_image_from_system_metadata(
+            instance.system_metadata)
+
+        # NOTE(sbauza): If a reschedule occurs when prep_resize(), then
+        # it only provides filter_properties legacy dict back to the
+        # conductor with no RequestSpec part of the payload.
+        if not request_spec:
+            # Make sure we hydrate a new RequestSpec object with the new flavor
+            # and not the nested one from the instance
+            request_spec = objects.RequestSpec.from_components(
+                context, instance.uuid, image,
+                flavor, instance.numa_topology, instance.pci_requests,
+                filter_properties, None, instance.availability_zone)
+        else:
+            # NOTE(sbauza): Resizes means new flavor, so we need to update the
+            # original RequestSpec object for make sure the scheduler verifies
+            # the right one and not the original flavor
+            request_spec.flavor = flavor
+
+        task = self._build_live_resize_task(context, instance, flavor,
                                              request_spec,
                                              reservations, clean_shutdown)
         # TODO(sbauza): Provide directly the RequestSpec object once
@@ -432,6 +529,15 @@ class ComputeTaskManager(base.Base):
                                  request_spec, reservations,
                                  clean_shutdown):
         return migrate.MigrationTask(context, instance, flavor,
+                                     request_spec,
+                                     reservations, clean_shutdown,
+                                     self.compute_rpcapi,
+                                     self.scheduler_client)
+
+    def _build_live_resize_task(self, context, instance, flavor,
+                                 request_spec, reservations,
+                                 clean_shutdown):
+        return live_resize.LiveResizeTask(context, instance, flavor,
                                      request_spec,
                                      reservations, clean_shutdown,
                                      self.compute_rpcapi,

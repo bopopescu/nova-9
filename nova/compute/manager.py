@@ -3539,6 +3539,123 @@ class ComputeManager(manager.Manager):
             quotas.commit()
 
     @wrap_exception()
+    @wrap_instance_event(prefix='compute')
+    @wrap_instance_fault
+    def confirm_live_resize(self, context, instance, reservations, migration):
+
+        quotas = objects.Quotas.from_reservations(context,
+                                                  reservations,
+                                                  instance=instance)
+
+        @utils.synchronized(instance.uuid)
+        def do_confirm_live_resize(context, instance, migration_id):
+            # NOTE(wangpan): Get the migration status from db, if it has been
+            #                confirmed, we do nothing and return here
+            LOG.debug("Going to confirm migration %s", migration_id,
+                      instance=instance)
+            try:
+                # TODO(russellb) Why are we sending the migration object just
+                # to turn around and look it up from the db again?
+                migration = objects.Migration.get_by_id(
+                                    context.elevated(), migration_id)
+            except exception.MigrationNotFound:
+                LOG.error(_LE("Migration %s is not found during confirmation"),
+                          migration_id, instance=instance)
+                quotas.rollback()
+                return
+
+            if migration.status == 'confirmed':
+                LOG.info(_LI("Migration %s is already confirmed"),
+                         migration_id, instance=instance)
+                quotas.rollback()
+                return
+            elif migration.status not in ('finished', 'confirming'):
+                LOG.warning(_LW("Unexpected confirmation status '%(status)s' "
+                                "of migration %(id)s, exit confirmation "
+                                "process"),
+                            {"status": migration.status, "id": migration_id},
+                            instance=instance)
+                quotas.rollback()
+                return
+
+            # NOTE(wangpan): Get the instance from db, if it has been
+            #                deleted, we do nothing and return here
+            expected_attrs = ['metadata', 'system_metadata', 'flavor']
+            try:
+                instance = objects.Instance.get_by_uuid(
+                        context, instance.uuid,
+                        expected_attrs=expected_attrs)
+            except exception.InstanceNotFound:
+                LOG.info(_LI("Instance is not found during confirmation"),
+                         instance=instance)
+                quotas.rollback()
+                return
+
+            self._confirm_live_resize(context, instance, quotas,
+                                 migration=migration)
+
+        do_confirm_live_resize(context, instance, migration.id)
+
+    def _confirm_live_resize(self, context, instance, quotas,
+                        migration=None):
+        """Destroys the source instance."""
+        self._notify_about_instance_usage(context, instance,
+                                          "resize.confirm.start")
+
+        with self._error_out_instance_on_exception(context, instance,
+                                                   quotas=quotas):
+            # NOTE(danms): delete stashed migration information
+            old_instance_type = instance.old_flavor
+            instance.old_flavor = None
+            instance.new_flavor = None
+            instance.system_metadata.pop('old_vm_state', None)
+            instance.save()
+
+            # NOTE(tr3buchet): tear down networks on source host
+            # self.network_api.setup_networks_on_host(context, instance,
+            #                    migration.source_compute, teardown=True)
+            #
+            # network_info = self.network_api.get_instance_nw_info(context,
+            #                                                      instance)
+            # self.driver.confirm_migration(context, migration, instance,
+            #                               network_info)
+            network_info = None
+            migration.status = 'confirmed'
+            with migration.obj_as_admin():
+                migration.save()
+
+            rt = self._get_resource_tracker()
+            rt.drop_move_claim(context, instance, migration.source_node,
+                               old_instance_type, prefix='old_')
+            instance.drop_migration_context()
+
+            # NOTE(mriedem): The old_vm_state could be STOPPED but the user
+            # might have manually powered up the instance to confirm the
+            # resize/migrate, so we need to check the current power state
+            # on the instance and set the vm_state appropriately. We default
+            # to ACTIVE because if the power state is not SHUTDOWN, we
+            # assume _sync_instance_power_state will clean it up.
+            p_state = instance.power_state
+            vm_state = None
+            if p_state == power_state.SHUTDOWN:
+                vm_state = vm_states.STOPPED
+                LOG.debug("Resized/migrated instance is powered off. "
+                          "Setting vm_state to '%s'.", vm_state,
+                          instance=instance)
+            else:
+                vm_state = vm_states.ACTIVE
+
+            instance.vm_state = vm_state
+            instance.task_state = None
+            instance.save(expected_task_state=[None, task_states.DELETING])
+
+            self._notify_about_instance_usage(
+                context, instance, "resize.confirm.end",
+                network_info=network_info)
+
+            quotas.commit()
+
+    @wrap_exception()
     @reverts_task_state
     @wrap_instance_event(prefix='compute')
     @errors_out_migration
@@ -3908,6 +4025,229 @@ class ComputeManager(manager.Manager):
                    phase=fields.NotificationPhase.END)
             self.instance_events.clear_events_for_instance(instance)
 
+    def _prep_live_resize(self, context, image, instance, instance_type,
+            quotas, request_spec, filter_properties, node,
+            clean_shutdown=True):
+
+        if not filter_properties:
+            filter_properties = {}
+
+        if not instance.host:
+            self._set_instance_obj_error_state(context, instance)
+            msg = _('Instance has no source host')
+            raise exception.MigrationError(reason=msg)
+
+        same_host = instance.host == self.host
+        # if the flavor IDs match, it's migrate; otherwise resize
+        if same_host and instance_type.id == instance['instance_type_id']:
+            # check driver whether support migrate to same host
+            if not self.driver.capabilities['supports_migrate_to_same_host']:
+                raise exception.UnableToMigrateToSelf(
+                    instance_id=instance.uuid, host=self.host)
+
+        # NOTE(danms): Stash the new instance_type to avoid having to
+        # look it up in the database later
+        instance.new_flavor = instance_type
+        # NOTE(mriedem): Stash the old vm_state so we can set the
+        # resized/reverted instance back to the same state later.
+        vm_state = instance.vm_state
+        LOG.debug('Stashing vm_state: %s', vm_state, instance=instance)
+        instance.system_metadata['old_vm_state'] = vm_state
+        instance.save()
+
+        limits = filter_properties.get('limits', {})
+        rt = self._get_resource_tracker()
+        with rt.resize_claim(context, instance, instance_type, node,
+                             image_meta=image, limits=limits) as claim:
+            LOG.info(_LI('Migrating'), instance=instance)
+            self.compute_rpcapi.live_resize_instance(
+                    context, instance, claim.migration, image,
+                    instance_type, quotas.reservations,
+                    clean_shutdown)
+
+    @wrap_exception()
+    @reverts_task_state
+    @wrap_instance_event(prefix='compute')
+    @wrap_instance_fault
+    def prep_live_resize(self, context, image, instance, instance_type,
+                    reservations, request_spec, filter_properties, node,
+                    clean_shutdown):
+        """Initiates the process of moving a running instance to another host.
+
+        Possibly changes the RAM and disk size in the process.
+
+        """
+        if node is None:
+            node = self.driver.get_available_nodes(refresh=True)[0]
+            LOG.debug("No node specified, defaulting to %s", node,
+                      instance=instance)
+
+        # NOTE(melwitt): Remove this in version 5.0 of the RPC API
+        # Code downstream may expect extra_specs to be populated since it
+        # is receiving an object, so lookup the flavor to ensure this.
+        if not isinstance(instance_type, objects.Flavor):
+            instance_type = objects.Flavor.get_by_id(context,
+                                                     instance_type['id'])
+
+        quotas = objects.Quotas.from_reservations(context,
+                                                  reservations,
+                                                  instance=instance)
+        with self._error_out_instance_on_exception(context, instance,
+                                                   quotas=quotas):
+            compute_utils.notify_usage_exists(self.notifier, context, instance,
+                                              current_period=True)
+            self._notify_about_instance_usage(
+                    context, instance, "resize.prep.start")
+            try:
+                self._prep_live_resize(context, image, instance,
+                                  instance_type, quotas,
+                                  request_spec, filter_properties,
+                                  node, clean_shutdown)
+            # NOTE(dgenin): This is thrown in LibvirtDriver when the
+            #               instance to be migrated is backed by LVM.
+            #               Remove when LVM migration is implemented.
+            except exception.MigrationPreCheckError:
+                raise
+            except Exception:
+                # try to re-schedule the resize elsewhere:
+                exc_info = sys.exc_info()
+                self._reschedule_live_resize_or_reraise(context, image, instance,
+                        exc_info, instance_type, quotas, request_spec,
+                        filter_properties)
+            finally:
+                extra_usage_info = dict(
+                        new_instance_type=instance_type.name,
+                        new_instance_type_id=instance_type.id)
+
+                self._notify_about_instance_usage(
+                    context, instance, "resize.prep.end",
+                    extra_usage_info=extra_usage_info)
+
+    def _reschedule_live_resize_or_reraise(self, context, image, instance, exc_info,
+                                      instance_type, quotas, request_spec, filter_properties):
+        """Try to re-schedule the resize or re-raise the original error to
+        error out the instance.
+        """
+        if not request_spec:
+            request_spec = {}
+        if not filter_properties:
+            filter_properties = {}
+
+        rescheduled = False
+        instance_uuid = instance.uuid
+
+        try:
+            reschedule_method = self.compute_task_api.live_resize_instance
+            scheduler_hint = dict(filter_properties=filter_properties)
+            method_args = (instance, None, scheduler_hint, instance_type,
+                           quotas.reservations)
+            task_state = task_states.RESIZE_PREP
+
+            rescheduled = self._reschedule(context, request_spec,
+                                           filter_properties, instance, reschedule_method,
+                                           method_args, task_state, exc_info)
+        except Exception as error:
+            rescheduled = False
+            LOG.exception(_LE("Error trying to reschedule"),
+                          instance_uuid=instance_uuid)
+            compute_utils.add_instance_fault_from_exc(context,
+                                                      instance, error,
+                                                      exc_info=sys.exc_info())
+            self._notify_about_instance_usage(context, instance,
+                                              'resize.error', fault=error)
+
+        if rescheduled:
+            self._log_original_error(exc_info, instance_uuid)
+            compute_utils.add_instance_fault_from_exc(context,
+                                                      instance, exc_info[1], exc_info=exc_info)
+            self._notify_about_instance_usage(context, instance,
+                                              'resize.error', fault=exc_info[1])
+        else:
+            # not re-scheduling
+            six.reraise(*exc_info)
+
+    @wrap_exception()
+    @reverts_task_state
+    @wrap_instance_event(prefix='compute')
+    @errors_out_migration
+    @wrap_instance_fault
+    def live_resize_instance(self, context, instance, image,
+                        reservations, migration, instance_type,
+                        clean_shutdown):
+        """Starts the migration of a running instance to another host."""
+
+        quotas = objects.Quotas.from_reservations(context,
+                                                  reservations,
+                                                  instance=instance)
+        with self._error_out_instance_on_exception(context, instance,
+                                                   quotas=quotas):
+            # TODO(chaochin) Remove this until v5 RPC API
+            # Code downstream may expect extra_specs to be populated since it
+            # is receiving an object, so lookup the flavor to ensure this.
+            if (not instance_type or
+                    not isinstance(instance_type, objects.Flavor)):
+                instance_type = objects.Flavor.get_by_id(
+                    context, migration['new_instance_type_id'])
+
+            network_info = self.network_api.get_instance_nw_info(context,
+                                                                 instance)
+
+            migration.status = 'migrating'
+            with migration.obj_as_admin():
+                migration.save()
+
+            instance.task_state = task_states.RESIZE_MIGRATING
+            instance.save(expected_task_state=task_states.RESIZE_PREP)
+
+            self._notify_about_instance_usage(
+                context, instance, "resize.start", network_info=network_info)
+
+            compute_utils.notify_about_instance_action(context, instance,
+                                                       self.host, action=fields.NotificationAction.RESIZE,
+                                                       phase=fields.NotificationPhase.START)
+            disk_info = None
+
+            # bdms = objects.BlockDeviceMappingList.get_by_instance_uuid(
+            #     context, instance.uuid)
+            # block_device_info = self._get_instance_block_device_info(
+            #     context, instance, bdms=bdms)
+
+            # timeout, retry_interval = self._get_power_off_values(context,
+            #                                                      # instance, clean_shutdown)
+            # disk_info = self.driver.migrate_disk_and_power_off(
+            #     context, instance, migration.dest_host,
+            #     instance_type, network_info,
+            #     block_device_info,
+            #     timeout, retry_interval)
+            #
+            # self._terminate_volume_connections(context, instance, bdms)
+            #
+            # migration_p = obj_base.obj_to_primitive(migration)
+            # self.network_api.migrate_instance_start(context,
+            #                                         instance,
+            #                                         migration_p)
+
+            migration.status = 'post-migrating'
+            with migration.obj_as_admin():
+                migration.save()
+
+            instance.host = migration.dest_compute
+            instance.node = migration.dest_node
+            instance.task_state = task_states.RESIZE_MIGRATED
+            instance.save(expected_task_state=task_states.RESIZE_MIGRATING)
+
+            self.compute_rpcapi.finish_live_resize(context, instance,
+                                              migration, image, disk_info,
+                                              migration.dest_compute, reservations=quotas.reservations)
+
+            self._notify_about_instance_usage(context, instance, "resize.end",
+                                              network_info=network_info)
+
+            compute_utils.notify_about_instance_action(context, instance,
+                                                       self.host, action=fields.NotificationAction.RESIZE,
+                                                       phase=fields.NotificationPhase.END)
+            self.instance_events.clear_events_for_instance(instance)
+
     def _terminate_volume_connections(self, context, instance, bdms):
         connector = self.driver.get_volume_connector(instance)
         for bdm in bdms:
@@ -4024,6 +4364,144 @@ class ComputeManager(manager.Manager):
         try:
             image_meta = objects.ImageMeta.from_dict(image)
             self._finish_resize(context, instance, migration,
+                                disk_info, image_meta)
+            quotas.commit()
+        except Exception:
+            LOG.exception(_LE('Setting instance vm_state to ERROR'),
+                          instance=instance)
+            with excutils.save_and_reraise_exception():
+                try:
+                    quotas.rollback()
+                except Exception:
+                    LOG.exception(_LE("Failed to rollback quota for failed "
+                                      "finish_resize"),
+                                  instance=instance)
+                self._set_instance_obj_error_state(context, instance)
+
+    def _finish_live_resize(self, context, instance, migration, disk_info,
+                       image_meta):
+        resize_instance = False
+        old_instance_type_id = migration['old_instance_type_id']
+        new_instance_type_id = migration['new_instance_type_id']
+        old_instance_type = instance.get_flavor()
+        # NOTE(mriedem): Get the old_vm_state so we know if we should
+        # power on the instance. If old_vm_state is not set we need to default
+        # to ACTIVE for backwards compatibility
+        old_vm_state = instance.system_metadata.get('old_vm_state',
+                                                    vm_states.ACTIVE)
+        instance.old_flavor = old_instance_type
+
+        # if old_instance_type_id != new_instance_type_id:
+        #     instance_type = instance.get_flavor('new')
+        #     self._set_instance_info(instance, instance_type)
+        #     for key in ('root_gb', 'swap', 'ephemeral_gb'):
+        #         if old_instance_type[key] != instance_type[key]:
+        #             resize_instance = True
+        #             break
+        instance.apply_migration_context()
+
+        # NOTE(tr3buchet): setup networks on destination host
+        # self.network_api.setup_networks_on_host(context, instance,
+        #                                         migration['dest_compute'])
+        #
+
+        # migration_p = obj_base.obj_to_primitive(migration)
+        # self.network_api.migrate_instance_finish(context,
+        #                                          instance,
+        #                                          migration_p)
+        #
+        # network_info = self.network_api.get_instance_nw_info(context, instance)
+        network_info = None
+        instance.task_state = task_states.RESIZE_FINISH
+        instance.save(expected_task_state=task_states.RESIZE_MIGRATED)
+
+        self._notify_about_instance_usage(
+            context, instance, "finish_resize.start",
+            network_info=network_info)
+        compute_utils.notify_about_instance_action(context, instance,
+                                                   self.host, action=fields.NotificationAction.RESIZE_FINISH,
+                                                   phase=fields.NotificationPhase.START)
+
+        block_device_info = self._get_instance_block_device_info(
+            context, instance, refresh_conn_info=True)
+
+        # NOTE(mriedem): If the original vm_state was STOPPED, we don't
+        # automatically power on the instance after it's migrated
+        power_on = old_vm_state != vm_states.STOPPED
+
+        try:
+            # self.driver.finish_migration(context, migration, instance,
+            #                              disk_info,
+            #                              network_info,
+            #                              image_meta, resize_instance,
+            #                              block_device_info, power_on)
+            if old_instance_type_id != new_instance_type_id:
+                from ics_sdk import session
+                ics_manager = session.get_session()
+
+                instance_type = instance.get_flavor('new')
+
+                vm_id = instance.uuid
+                new_cpu_num = instance_type.vcpus
+                new_mem_num = instance_type.memory_mb
+                LOG.info(_LI("ICS_SDK hotplug_vm start..."))
+                LOG.info(_LI("vm_id=%s, new_cpu_num=%d, new_mem_num=%d" % (vm_id, new_cpu_num, new_mem_num)))
+                ret = ics_manager.vm.hotplug_vm(vm_id, new_cpu_num, new_mem_num)
+                LOG.info(_LI("ics_manager.vm.hotplug_vm response: %s" % (str(ret))))
+
+                for key in ('root_gb', 'swap', 'ephemeral_gb'):
+                    if old_instance_type[key] != instance_type[key]:
+                        resize_instance = True
+                        break
+                if resize_instance:
+                    # TODO: resize image
+                    pass
+                # save instance after ics operation done.
+                self._set_instance_info(instance, instance_type)
+
+        except Exception as e:
+            LOG.exception(e)
+            with excutils.save_and_reraise_exception():
+                if old_instance_type_id != new_instance_type_id:
+                    self._set_instance_info(instance,
+                                            old_instance_type)
+
+        migration.status = 'finished'
+        with migration.obj_as_admin():
+            migration.save()
+
+        instance.vm_state = vm_states.RESIZED
+        instance.task_state = None
+        instance.launched_at = timeutils.utcnow()
+        instance.save(expected_task_state=task_states.RESIZE_FINISH)
+
+        self._update_scheduler_instance_info(context, instance)
+        self._notify_about_instance_usage(
+            context, instance, "finish_resize.end",
+            network_info=network_info)
+        compute_utils.notify_about_instance_action(context, instance,
+                                                   self.host, action=fields.NotificationAction.RESIZE_FINISH,
+                                                   phase=fields.NotificationPhase.END)
+
+    @wrap_exception()
+    @reverts_task_state
+    @wrap_instance_event(prefix='compute')
+    @errors_out_migration
+    @wrap_instance_fault
+    def finish_live_resize(self, context, disk_info, image, instance,
+                      reservations, migration):
+        """Completes the migration process.
+
+        Sets up the newly transferred disk and turns on the instance at its
+        new host machine.
+
+        """
+        quotas = objects.Quotas.from_reservations(context,
+                                                  reservations,
+                                                  instance=instance)
+        try:
+            image_meta = objects.ImageMeta.from_dict(image)
+            self._finish_live_resize(context, instance, migration,
                                 disk_info, image_meta)
             quotas.commit()
         except Exception:
@@ -6047,6 +6525,92 @@ class ComputeManager(manager.Manager):
                 continue
             try:
                 self.compute_api.confirm_resize(context, instance,
+                                                migration=migration)
+            except Exception as e:
+                LOG.info(_LI("Error auto-confirming resize: %s. "
+                             "Will retry later."),
+                         e, instance=instance)
+
+    @periodic_task.periodic_task
+    def _poll_unconfirmed_live_resizes(self, context):
+        if CONF.live_resize_confirm_window == 0:
+            return
+
+        migrations = objects.MigrationList.get_unconfirmed_by_dest_compute(
+                context, CONF.live_resize_confirm_window, self.host,
+                use_slave=True)
+
+        migrations_info = dict(migration_count=len(migrations),
+                confirm_window=CONF.live_resize_confirm_window)
+
+        if migrations_info["migration_count"] > 0:
+            LOG.info(_LI("Found %(migration_count)d unconfirmed migrations "
+                         "older than %(confirm_window)d seconds"),
+                     migrations_info)
+
+        def _set_migration_to_error(migration, reason, **kwargs):
+            LOG.warning(_LW("Setting migration %(migration_id)s to error: "
+                         "%(reason)s"),
+                     {'migration_id': migration['id'], 'reason': reason},
+                     **kwargs)
+            migration.status = 'error'
+            with migration.obj_as_admin():
+                migration.save()
+
+        for migration in migrations:
+            instance_uuid = migration.instance_uuid
+            LOG.info(_LI("Automatically confirming migration "
+                         "%(migration_id)s for instance %(instance_uuid)s"),
+                     {'migration_id': migration.id,
+                      'instance_uuid': instance_uuid})
+            expected_attrs = ['metadata', 'system_metadata']
+            try:
+                instance = objects.Instance.get_by_uuid(context,
+                            instance_uuid, expected_attrs=expected_attrs,
+                            use_slave=True)
+            except exception.InstanceNotFound:
+                reason = (_("Instance %s not found") %
+                          instance_uuid)
+                _set_migration_to_error(migration, reason)
+                continue
+            if instance.vm_state == vm_states.ERROR:
+                reason = _("In ERROR state")
+                _set_migration_to_error(migration, reason,
+                                        instance=instance)
+                continue
+            # race condition: The instance in DELETING state should not be
+            # set the migration state to error, otherwise the instance in
+            # to be deleted which is in RESIZED state
+            # will not be able to confirm resize
+            if instance.task_state in [task_states.DELETING,
+                                       task_states.SOFT_DELETING]:
+                msg = ("Instance being deleted or soft deleted during resize "
+                       "confirmation. Skipping.")
+                LOG.debug(msg, instance=instance)
+                continue
+
+            # race condition: This condition is hit when this method is
+            # called between the save of the migration record with a status of
+            # finished and the save of the instance object with a state of
+            # RESIZED. The migration record should not be set to error.
+            if instance.task_state == task_states.RESIZE_FINISH:
+                msg = ("Instance still resizing during resize "
+                       "confirmation. Skipping.")
+                LOG.debug(msg, instance=instance)
+                continue
+
+            vm_state = instance.vm_state
+            task_state = instance.task_state
+            if vm_state != vm_states.RESIZED or task_state is not None:
+                reason = (_("In states %(vm_state)s/%(task_state)s, not "
+                           "RESIZED/None") %
+                          {'vm_state': vm_state,
+                           'task_state': task_state})
+                _set_migration_to_error(migration, reason,
+                                        instance=instance)
+                continue
+            try:
+                self.compute_api.confirm_live_resize(context, instance,
                                                 migration=migration)
             except Exception as e:
                 LOG.info(_LI("Error auto-confirming resize: %s. "

@@ -321,6 +321,34 @@ class ComputeTaskAPI(object):
         cctxt = self.client.prepare(version=version)
         return cctxt.call(context, 'migrate_server', **kw)
 
+    def live_resize_instance(self, context, instance, scheduler_hint, live, rebuild,
+                  flavor, block_migration, disk_over_commit,
+                  reservations=None, clean_shutdown=True, request_spec=None):
+        kw = {'instance': instance, 'scheduler_hint': scheduler_hint,
+              'live': live, 'rebuild': rebuild, 'flavor': flavor,
+              'block_migration': block_migration,
+              'disk_over_commit': disk_over_commit,
+              'reservations': reservations,
+              'clean_shutdown': clean_shutdown,
+              'request_spec': request_spec,
+              }
+        version = '1.13'
+        if not self.client.can_send_version(version):
+            del kw['request_spec']
+            version = '1.11'
+        if not self.client.can_send_version(version):
+            del kw['clean_shutdown']
+            version = '1.10'
+        if not self.client.can_send_version(version):
+            kw['flavor'] = objects_base.obj_to_primitive(flavor)
+            version = '1.6'
+        if not self.client.can_send_version(version):
+            kw['instance'] = jsonutils.to_primitive(
+                    objects_base.obj_to_primitive(instance))
+            version = '1.4'
+        cctxt = self.client.prepare(version=version)
+        return cctxt.call(context, 'live_resize_instance', **kw)
+
     def build_instances(self, context, instances, image, filter_properties,
             admin_password, injected_files, requested_networks,
             security_groups, block_device_mapping, legacy_bdm=True):

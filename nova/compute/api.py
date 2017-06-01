@@ -3128,6 +3128,36 @@ class API(base.Base):
                                            migration.source_compute,
                                            quotas.reservations or [])
 
+    @check_instance_lock
+    @check_instance_cell
+    @check_instance_state(vm_state=[vm_states.RESIZED])
+    def confirm_live_resize(self, context, instance, migration=None):
+        """Confirms a migration/resize and deletes the 'old' instance."""
+        elevated = context.elevated()
+        if migration is None:
+            migration = objects.Migration.get_by_instance_and_status(
+                elevated, instance.uuid, 'finished')
+
+        # reserve quota only for any decrease in resource usage
+        deltas = compute_utils.downsize_quota_delta(context, instance)
+        quotas = compute_utils.reserve_quota_delta(context, deltas, instance)
+
+        migration.status = 'confirming'
+        migration.save()
+        # With cells, the best we can do right now is commit the reservations
+        # immediately...
+        if CONF.cells.enable:
+            quotas.commit()
+
+        self._record_action_start(context, instance,
+                                  instance_actions.CONFIRM_RESIZE)
+
+        self.compute_rpcapi.confirm_live_resize(context,
+                                           instance,
+                                           migration,
+                                           migration.source_compute,
+                                           quotas.reservations or [])
+
     @staticmethod
     def _resize_cells_support(context, quotas, instance,
                               current_instance_type, new_instance_type):
@@ -3267,6 +3297,130 @@ class API(base.Base):
 
         scheduler_hint = {'filter_properties': filter_properties}
         self.compute_task_api.resize_instance(context, instance,
+                extra_instance_updates, scheduler_hint=scheduler_hint,
+                flavor=new_instance_type,
+                reservations=quotas.reservations or [],
+                clean_shutdown=clean_shutdown,
+                request_spec=request_spec)
+
+    @check_instance_lock
+    @check_instance_cell
+    @check_instance_state(vm_state=[vm_states.ACTIVE, vm_states.STOPPED])
+    def live_resize(self, context, instance, flavor_id=None, clean_shutdown=True,
+               **extra_instance_updates):
+        """Live resize a running instance.
+
+        If flavor_id is None, the process is considered a migration, keeping
+        the original flavor_id. If flavor_id is not None, the instance should
+        be migrated to a new host and resized to the new flavor_id.
+        """
+        LOG.debug("live_resize")
+        self._check_auto_disk_config(instance, **extra_instance_updates)
+
+        current_instance_type = instance.get_flavor()
+
+        # If flavor_id is not provided, only migrate the instance.
+        if not flavor_id:
+            LOG.debug("flavor_id is None. Assuming migration.",
+                      instance=instance)
+            new_instance_type = current_instance_type
+        else:
+            LOG.debug("flavor_id is %s" % flavor_id)
+            new_instance_type = flavors.get_flavor_by_flavor_id(
+                    flavor_id, read_deleted="no")
+            if (new_instance_type.get('root_gb') == 0 and
+                current_instance_type.get('root_gb') != 0 and
+                not compute_utils.is_volume_backed_instance(context,
+                    instance)):
+                reason = _('Resize to zero disk flavor is not allowed.')
+                raise exception.CannotResizeDisk(reason=reason)
+
+        if not new_instance_type:
+            raise exception.FlavorNotFound(flavor_id=flavor_id)
+
+        current_instance_type_name = current_instance_type['name']
+        new_instance_type_name = new_instance_type['name']
+        LOG.debug("Old instance type %(current_instance_type_name)s, "
+                  "new instance type %(new_instance_type_name)s",
+                  {'current_instance_type_name': current_instance_type_name,
+                   'new_instance_type_name': new_instance_type_name},
+                  instance=instance)
+
+        same_instance_type = (current_instance_type['id'] ==
+                              new_instance_type['id'])
+
+        # NOTE(sirp): We don't want to force a customer to change their flavor
+        # when Ops is migrating off of a failed host.
+        if not same_instance_type and new_instance_type.get('disabled'):
+            raise exception.FlavorNotFound(flavor_id=flavor_id)
+
+        if same_instance_type and flavor_id and self.cell_type != 'compute':
+            raise exception.CannotResizeToSameFlavor()
+
+        # ensure there is sufficient headroom for upsizes
+        if flavor_id:
+            deltas = compute_utils.upsize_quota_delta(context,
+                                                      new_instance_type,
+                                                      current_instance_type)
+            try:
+                quotas = compute_utils.reserve_quota_delta(context, deltas,
+                                                           instance)
+            except exception.OverQuota as exc:
+                quotas = exc.kwargs['quotas']
+                overs = exc.kwargs['overs']
+                usages = exc.kwargs['usages']
+                headroom = self._get_headroom(quotas, usages, deltas)
+                (overs, reqs, total_alloweds,
+                 useds) = self._get_over_quota_detail(headroom, overs, quotas,
+                                                      deltas)
+                LOG.warning(_LW("%(overs)s quota exceeded for %(pid)s,"
+                                " tried to resize instance."),
+                            {'overs': overs, 'pid': context.project_id})
+                raise exception.TooManyInstances(overs=overs,
+                                                 req=reqs,
+                                                 used=useds,
+                                                 allowed=total_alloweds)
+        else:
+            quotas = objects.Quotas(context=context)
+
+        instance.task_state = task_states.RESIZE_PREP
+        instance.progress = 0
+        instance.update(extra_instance_updates)
+        instance.save(expected_task_state=[None])
+
+        filter_properties = {'ignore_hosts': []}
+
+        if not CONF.allow_resize_to_same_host:
+            filter_properties['ignore_hosts'].append(instance.host)
+
+        if self.cell_type == 'api':
+            # Commit reservations early and create migration record.
+            self._resize_cells_support(context, quotas, instance,
+                                       current_instance_type,
+                                       new_instance_type)
+
+        if not flavor_id:
+            self._record_action_start(context, instance,
+                                      instance_actions.MIGRATE)
+        else:
+            self._record_action_start(context, instance,
+                                      instance_actions.RESIZE)
+
+        # NOTE(sbauza): The migration script we provided in Newton should make
+        # sure that all our instances are currently migrated to have an
+        # attached RequestSpec object but let's consider that the operator only
+        # half migrated all their instances in the meantime.
+        try:
+            request_spec = objects.RequestSpec.get_by_instance_uuid(
+                context, instance.uuid)
+            request_spec.ignore_hosts = filter_properties['ignore_hosts']
+        except exception.RequestSpecNotFound:
+            # Some old instances can still have no RequestSpec object attached
+            # to them, we need to support the old way
+            request_spec = None
+
+        scheduler_hint = {'filter_properties': filter_properties}
+        self.compute_task_api.live_resize_instance(context, instance,
                 extra_instance_updates, scheduler_hint=scheduler_hint,
                 flavor=new_instance_type,
                 reservations=quotas.reservations or [],

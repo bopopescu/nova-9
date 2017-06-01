@@ -1756,6 +1756,16 @@ class MessageRunner(object):
         self._instance_action(ctxt, instance, 'resize_instance',
                               extra_kwargs=extra_kwargs)
 
+    def live_resize_instance(self, ctxt, instance, flavor,
+                       extra_instance_updates,
+                       clean_shutdown=True):
+        """Resize an instance in its cell."""
+        extra_kwargs = dict(flavor=flavor,
+                            extra_instance_updates=extra_instance_updates,
+                            clean_shutdown=clean_shutdown)
+        self._instance_action(ctxt, instance, 'live_resize_instance',
+                              extra_kwargs=extra_kwargs)
+
     def live_migrate_instance(self, ctxt, instance, block_migration,
                               disk_over_commit, host_name):
         """Live migrate an instance in its cell."""
@@ -1772,6 +1782,10 @@ class MessageRunner(object):
     def confirm_resize(self, ctxt, instance):
         """Confirm a resize for an instance in its cell."""
         self._instance_action(ctxt, instance, 'confirm_resize')
+
+    def confirm_live_resize(self, ctxt, instance):
+        """Confirm a resize for an instance in its cell."""
+        self._instance_action(ctxt, instance, 'confirm_live_resize')
 
     def reset_network(self, ctxt, instance):
         """Reset networking for an instance in its cell."""

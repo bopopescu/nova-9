@@ -914,6 +914,25 @@ Possible values:
 * 0: Disables the option (default)
 * Any positive integer in seconds: Enables the option.
 """),
+    cfg.IntOpt("live_resize_confirm_window",
+        default=1,
+        min=0,
+        help="""
+Automatically confirm resizes after N seconds.
+
+Resize functionality will save the existing server before resizing.
+After the resize completes, user is requested to confirm the resize.
+The user has the opportunity to either confirm or revert all
+changes. Confirm resize removes the original server and changes
+server status from resized to active. Setting this option to a time
+period (in seconds) will automatically confirm the resize if the
+server is in resized state longer than that time.
+
+Possible values:
+
+* 0: Disables the option(default=1)
+* Any positive integer in seconds: Enables the option.
+"""),
     cfg.IntOpt("shutdown_timeout",
         default=60,
         min=1,

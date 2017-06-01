@@ -206,6 +206,23 @@ base_resize = {
     'additionalProperties': False,
 }
 
+base_live_resize = {
+    'type': 'object',
+    'properties': {
+        'live_resize': {
+            'type': 'object',
+            'properties': {
+                'flavorRef': parameter_types.flavor_ref,
+                'OS-DCF:diskConfig': parameter_types.disk_config,
+            },
+            'required': ['flavorRef'],
+            'additionalProperties': False,
+        },
+    },
+    'required': ['live_resize'],
+    'additionalProperties': False,
+}
+
 create_image = {
     'type': 'object',
     'properties': {

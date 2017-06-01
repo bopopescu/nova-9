@@ -66,6 +66,7 @@ class ServersController(wsgi.Controller):
     schema_server_update = schema_servers.base_update
     schema_server_rebuild = schema_servers.base_rebuild
     schema_server_resize = schema_servers.base_resize
+    schema_server_live_resize = schema_servers.base_live_resize
 
     schema_server_create_v20 = schema_servers.base_create_v20
     schema_server_update_v20 = schema_servers.base_update_v20
@@ -924,6 +925,45 @@ class ServersController(wsgi.Controller):
             msg = _("Invalid instance image.")
             raise exc.HTTPBadRequest(explanation=msg)
 
+    def _live_resize(self, req, instance_id, flavor_id, **kwargs):
+        """Begin the resize process with given instance/flavor."""
+        context = req.environ["nova.context"]
+        instance = self._get_server(context, req, instance_id)
+        context.can(server_policies.SERVERS % 'live_resize',
+                    target={'user_id': instance.user_id,
+                            'project_id': instance.project_id})
+
+        try:
+            self.compute_api.live_resize(context, instance, flavor_id, **kwargs)
+        except exception.InstanceUnknownCell as e:
+            raise exc.HTTPNotFound(explanation=e.format_message())
+        except exception.QuotaError as error:
+            raise exc.HTTPForbidden(
+                explanation=error.format_message())
+        except exception.InstanceIsLocked as e:
+            raise exc.HTTPConflict(explanation=e.format_message())
+        except exception.InstanceInvalidState as state_error:
+            common.raise_http_conflict_for_instance_invalid_state(state_error,
+                    'resize', instance_id)
+        except exception.ImageNotAuthorized:
+            msg = _("You are not authorized to access the image "
+                    "the instance was started with.")
+            raise exc.HTTPUnauthorized(explanation=msg)
+        except exception.ImageNotFound:
+            msg = _("Image that the instance was started "
+                    "with could not be found.")
+            raise exc.HTTPBadRequest(explanation=msg)
+        except (exception.AutoDiskConfigDisabledByImage,
+                exception.CannotResizeDisk,
+                exception.CannotResizeToSameFlavor,
+                exception.FlavorNotFound,
+                exception.NoValidHost,
+                exception.PciRequestAliasNotDefined) as e:
+            raise exc.HTTPBadRequest(explanation=e.format_message())
+        except exception.Invalid:
+            msg = _("Invalid instance image.")
+            raise exc.HTTPBadRequest(explanation=msg)
+
     @wsgi.response(204)
     @extensions.expected_errors((404, 409))
     def delete(self, req, id):
@@ -975,6 +1015,20 @@ class ServersController(wsgi.Controller):
         helpers.translate_attributes(helpers.RESIZE, resize_dict, kwargs)
 
         self._resize(req, id, flavor_ref, **kwargs)
+
+    @wsgi.response(202)
+    @extensions.expected_errors((400, 401, 403, 404, 409))
+    @wsgi.action('live_resize')
+    @validation.schema(schema_server_live_resize)
+    def _action_live_resize(self, req, id, body):
+        """Resizes a given instance to the flavor size requested."""
+        resize_dict = body['live_resize']
+        flavor_ref = str(resize_dict["flavorRef"])
+
+        kwargs = {}
+        helpers.translate_attributes(helpers.RESIZE, resize_dict, kwargs)
+
+        self._live_resize(req, id, flavor_ref, **kwargs)
 
     @wsgi.response(202)
     @extensions.expected_errors((400, 403, 404, 409))

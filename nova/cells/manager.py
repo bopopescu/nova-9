@@ -527,6 +527,14 @@ class CellsManager(manager.Manager):
                                         flavor, extra_instance_updates,
                                         clean_shutdown=clean_shutdown)
 
+    def live_resize_instance(self, ctxt, instance, flavor,
+                        extra_instance_updates,
+                        clean_shutdown=True):
+        """Resize an instance in its cell."""
+        self.msg_runner.live_resize_instance(ctxt, instance,
+                                        flavor, extra_instance_updates,
+                                        clean_shutdown=clean_shutdown)
+
     def live_migrate_instance(self, ctxt, instance, block_migration,
                               disk_over_commit, host_name):
         """Live migrate an instance in its cell."""
@@ -542,6 +550,10 @@ class CellsManager(manager.Manager):
     def confirm_resize(self, ctxt, instance):
         """Confirm a resize for an instance in its cell."""
         self.msg_runner.confirm_resize(ctxt, instance)
+
+    def confirm_live_resize(self, ctxt, instance):
+        """Confirm a resize for an instance in its cell."""
+        self.msg_runner.confirm_live_resize(ctxt, instance)
 
     def reset_network(self, ctxt, instance):
         """Reset networking for an instance in its cell."""

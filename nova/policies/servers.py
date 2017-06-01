@@ -39,6 +39,7 @@ rules = [
     policy.RuleDefault(SERVERS % 'revert_resize', RULE_AOO),
     policy.RuleDefault(SERVERS % 'reboot', RULE_AOO),
     policy.RuleDefault(SERVERS % 'resize', RULE_AOO),
+    policy.RuleDefault(SERVERS % 'live_resize', RULE_AOO),
     policy.RuleDefault(SERVERS % 'rebuild', RULE_AOO),
     policy.RuleDefault(SERVERS % 'create_image', RULE_AOO),
     policy.RuleDefault(SERVERS % 'create_image:allow_volume_backed', RULE_AOO),
