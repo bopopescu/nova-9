@@ -30,6 +30,9 @@ from nova.i18n import _
 from nova.i18n import _LE
 from nova.policies import migrate_server as ms_policies
 
+import json
+from ics_sdk import session
+
 LOG = logging.getLogger(__name__)
 ALIAS = "os-migrate-server"
 
@@ -38,6 +41,19 @@ class MigrateServerController(wsgi.Controller):
     def __init__(self, *args, **kwargs):
         super(MigrateServerController, self).__init__(*args, **kwargs)
         self.compute_api = compute.API()
+        self.ics_manager = session.get_session()
+        # ics info
+#        Loginconf = user_config.InspurConf()
+#        user_info = Loginconf.init_conf_file()
+#        user = user_info['SDK']['user']
+#        password = user_info['SDK']['password']
+#        url = user_info['SDK']['url']
+#        self.ics_manager = manager.Manager(user, password, url)
+#        user = 'admin'
+#        passwd = 'admin@inspur'
+#        icsip = 'https://100.2.30.85'
+#        self.ics_manager = manager.Manager(user, passwd, icsip)
+
 
     @wsgi.response(202)
     @extensions.expected_errors((400, 403, 404, 409))
@@ -61,6 +77,37 @@ class MigrateServerController(wsgi.Controller):
             raise exc.HTTPNotFound(explanation=e.format_message())
         except exception.NoValidHost as e:
             raise exc.HTTPBadRequest(explanation=e.format_message())
+    
+    @wsgi.response(202)
+    @extensions.expected_errors((400, 403, 404, 409))
+    @wsgi.action('migrateExtend')
+    def _migrate_extend(self, req, id, body):
+        """Permit admins to migrate a server to a new host."""
+        context = req.environ['nova.context']
+
+#        nodeSource = body["migrateExtend"]["nodeSource"]
+        nodeTarget = body["migrateExtend"]["nodeTarget"]
+        
+        instance = common.get_instance(self.compute_api, context, id)
+        try:
+            result = self.ics_manager.vm.live_migrate(id, nodeTarget)
+            res = {'success': True, "vmId": id, "hostId": nodeTarget, "result": result}
+            return dict(migrateExtend = res)
+#            body = self.ics_manager.vm.get_info(self, '0557ec0b_4e52_4228_a067_e6a7699ebe97') 
+#            result = self.ics_manager.host.get_host('5d85f39c-ef38-4bc3-991a-6f250b32221f')   
+#            print json.dumps(result) + "\n\n"            
+        except (exception.TooManyInstances, exception.QuotaError) as e:
+            raise exc.HTTPForbidden(explanation=e.format_message())
+        except exception.InstanceIsLocked as e:
+            raise exc.HTTPConflict(explanation=e.format_message())
+        except exception.InstanceInvalidState as state_error:
+            common.raise_http_conflict_for_instance_invalid_state(state_error,
+                    'migrateExtend', id)
+        except exception.InstanceNotFound as e:
+            raise exc.HTTPNotFound(explanation=e.format_message())
+        except exception.NoValidHost as e:
+            raise exc.HTTPBadRequest(explanation=e.format_message())
+
 
     @wsgi.response(202)
     @extensions.expected_errors((400, 404, 409))
