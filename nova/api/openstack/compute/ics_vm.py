@@ -71,7 +71,6 @@ class IcsVmController(wsgi.Controller):
         self._validate_image(context, isoid)
         self._validate_vm(context, vmid)
         # do ics-vm mount iso
-	
         LOG.info("begin to mount iso to ics_vm")
         res = {'success': True}
         return dict(vmMount=res)
