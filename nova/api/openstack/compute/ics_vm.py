@@ -73,20 +73,6 @@ class IcsVmController(wsgi.Controller):
         # do ics-vm mount iso
 	
         LOG.info("begin to mount iso to ics_vm")
-	'''
-        try:
-            task_info = self._ics_manager.vm.attach_cdrom(vm_id=vmid, isoid=isoid)
-        except Exception as e:
-            # do something
-            LOG.error("mount iso to ics_vm exception : " + e.message)
-            pass
-        LOG.info("end to mount iso to ics_vm")
-        state = task_info['state']
-        if state == 'FINISHED':
-            res = {'success': True}
-        else:
-            res = {'success': False}
-	'''
 	res = {'success': True}
 
         return dict(vmMount=res)
@@ -100,20 +86,6 @@ class IcsVmController(wsgi.Controller):
         self._validate_vm(context, vmid)
         # do ics-vm unmount iso
         LOG.info("begin to unmount iso to ics_vm")
-	'''
-        try:
-            task_info = self._ics_manager.vm.detach_cdrom(vm_id=vmid)
-        except Exception as e:
-            # do something
-            LOG.error("unmount iso to ics_vm exception : " + e.message)
-            pass
-        LOG.info("end to unmount iso to ics_vm")
-        state = task_info['state']
-        if state == 'FINISHED':
-            res = {'success': True}
-        else:
-            res = {'success': False}
-	'''
         res = {'success': True}
         return dict(vmUnmount=res)
 
