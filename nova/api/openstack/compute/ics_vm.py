@@ -73,8 +73,8 @@ class IcsVmController(wsgi.Controller):
         # do ics-vm mount iso
 	
         LOG.info("begin to mount iso to ics_vm")
-	res = {'success': True}
-	return dict(vmMount=res)
+        res = {'success': True}
+        return dict(vmMount=res)
 
     @extensions.expected_errors(404)
     @validation.schema(ics_vm.unmount)
