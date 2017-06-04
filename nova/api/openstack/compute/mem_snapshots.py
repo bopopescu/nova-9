@@ -171,6 +171,110 @@ class MemSnapshotsController(wsgi.Controller):
 
         return resp
 
+    @extensions.expected_errors((400, 403, 404, 409))
+    def detail(self, req, id):
+        """Get detail of a specific mem snapshot.
+        """
+
+        context = req.environ["nova.context"]
+        context.can(ms_policies.BASE_POLICY_NAME)
+
+        snapshot_id = id
+
+        try:
+            # call ics sdk
+            LOG.info('Get detail of mem snaphsot : %s', snapshot_id)
+            #ics_resp = self.ics_manager.detail_mem_snapshots(snapshot_id)
+            time.sleep(5)
+            #raise Exception('call ics sdk error')
+        except Exception as e:
+            resp = {
+                'err_status' : 'error',
+                'err_msg' : e.message
+            }
+
+            return resp
+
+        resp = {
+            "err_status" : "ok",
+            "result" : {
+                "snapshot_id" : snapshot_id,
+                "snapshot_name" : "snapshot_test",
+                "description" : "this is a test",
+                "createTime" : "2017-06-08 11:33:20",
+                "memory" : True,
+                "server_id" : "xxxxxx-yyyyyy-zzzzzz"
+            }
+        }
+
+        return resp
+
+    @extensions.expected_errors((400, 403, 404, 409))
+    def list(self, req, id):
+        """Get all mem snapshots of s specific instance.
+        """
+
+        context = req.environ["nova.context"]
+        context.can(ms_policies.BASE_POLICY_NAME)
+
+        server_id = id
+
+        try:
+            # call ics sdk
+            LOG.info('Get all mem snapshots for server : %s', server_id)
+            # ics_resp = self.ics_manager.list_mem_snapshots(server_id)
+            time.sleep(5)
+            # raise Exception('call ics sdk error')
+        except Exception as e:
+            resp = {
+                'err_status': 'error',
+                'err_msg': e.message
+            }
+
+            return resp
+
+        resp = {
+            "err_status": "ok",
+            "result": {
+                "server_id": server_id,
+                "server_name" : "test",
+                "children" : []
+            }
+        }
+
+        return resp
+
+    @extensions.expected_errors((400, 403, 404, 409))
+    @validation.schema(mem_snapshots.delete_mem_snapshots)
+    def delete(self, req, body):
+        """Delete a specific mem snapshot.
+        """
+
+        context = req.environ["nova.context"]
+        context.can(ms_policies.BASE_POLICY_NAME)
+
+        snapshot_id = body['snapshot_id']
+
+        try:
+            # call ics sdk
+            LOG.info('Delete mem snapshot : %s', snapshot_id)
+            # ics_resp = self.ics_manager.delete_mem_snapshots(server_id)
+            time.sleep(2)
+            # raise Exception('call ics sdk error')
+        except Exception as e:
+            resp = {
+                'err_status': 'error',
+                'err_msg': e.message
+            }
+
+            return resp
+
+        resp = {
+            "err_status": "ok",
+            "err_msg": "Delete snapshot successfully."
+        }
+
+        return resp
 
 class MemSnapshots(extensions.V21APIExtensionBase):
     """Memory snapshots support."""
@@ -183,7 +287,8 @@ class MemSnapshots(extensions.V21APIExtensionBase):
         return []
 
     def get_resources(self):
-        m_actions = {'create' : 'POST', 'restore' : 'POST', 'test': 'GET'}
-        resource = [extensions.ResourceExtension(ALIAS, MemSnapshotsController(), member_actions=m_actions)]
+        m_actions = {'create' : 'POST', 'restore' : 'POST', 'detail' : 'GET', "list" : "GET", 'test': 'GET'}
+        c_actions = {"delete" : "POST"}
+        resource = [extensions.ResourceExtension(ALIAS, MemSnapshotsController(), member_actions=m_actions, collection_actions=c_actions)]
 
         return resource

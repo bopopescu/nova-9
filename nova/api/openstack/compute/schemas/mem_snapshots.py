@@ -38,3 +38,13 @@ restore_mem_snapshots = {
     'additionalProperties': False,
 }
 
+delete_mem_snapshots = {
+    'type': 'object',
+    'properties': {
+        'snapshot_id': {
+            'type': 'string',
+        },
+    },
+    'required': ['snapshot_id'],
+    'additionalProperties': False,
+}
