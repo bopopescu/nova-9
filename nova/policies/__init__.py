@@ -101,10 +101,11 @@ from nova.policies import versions
 from nova.policies import virtual_interfaces
 from nova.policies import volumes
 from nova.policies import volumes_attachments
-
+from nova.policies import wstvms
 
 def list_rules():
     return itertools.chain(
+        wstvms.list_rules(),
         admin_actions.list_rules(),
         admin_password.list_rules(),
         agents.list_rules(),
