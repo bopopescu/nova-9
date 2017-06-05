@@ -102,6 +102,7 @@ from nova.policies import virtual_interfaces
 from nova.policies import volumes
 from nova.policies import volumes_attachments
 from nova.policies import wstvms
+from nova.policies import ics_vm
 
 def list_rules():
     return itertools.chain(
@@ -193,5 +194,6 @@ def list_rules():
         versions.list_rules(),
         virtual_interfaces.list_rules(),
         volumes.list_rules(),
-        volumes_attachments.list_rules()
+        volumes_attachments.list_rules(),
+        ics_vm.list_rules()
     )
