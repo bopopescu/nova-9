@@ -31,34 +31,59 @@ class ClustersController(wsgi.Controller):
     """The Clusters API controller for the OpenStack API."""
 
     def __init__(self):
-        self.ics_manager = ics_session.get_session()
+        self.ics_manager = None
+        self._get_ics_session()
         super(ClustersController, self).__init__()
+
+    def _get_ics_session(self):
+        if self.ics_manager:
+            return True
+        try:
+            self.ics_manager = ics_session.get_session()
+            return True
+        except:
+            self.ics_manager = None
+            return False
+
+    def _get_all_cluster_ids(self):
+        all_clusters = self.ics_manager.cluster.get_cluster_list().get('items')
+        cluster_ids = []
+        for c in all_clusters:
+            cluster_ids.append(c.get('id'))
+        return cluster_ids
 
     @extensions.expected_errors(404)
     def hosts(self, req, id):
-        context = req.environ['nova.context']
-        context.can(cl_policies.BASE_POLICY_NAME)
-        id = id.replace('ics.', '')
-        ics_hosts = self.ics_manager.host.get_hosts_in_cluster(id)
-        hosts = []
-        keys = ['id',
-                'clusterId',
-                'clusterName',
-                'name',  # ip
-                'logicalProcessor',
-                'cpuUsage',
-                'totalMem',
-                'memoryUsage',
-                'pnicNum',
-                'status']
-        for ics_host in ics_hosts:
-            host = {}
-            for k in keys:
-                host[k] = ics_host.get(k)
-            host['ip'] = ics_host.get('name')
-            host['totalMem'] = int(round(ics_host.get('totalMem')))
-            hosts.append(host)
-        return dict(hosts=hosts)
+        try:
+            context = req.environ['nova.context']
+            context.can(cl_policies.BASE_POLICY_NAME)
+            if not self._get_ics_session():
+                return dict(hosts=[], error='CANNOT_CONNECT_ICS')
+            id = id.replace('ics.', '')
+            if id not in self._get_all_cluster_ids():
+                return dict(hosts=[], error='CLUSTER_NOT_EXIST')
+            ics_hosts = self.ics_manager.host.get_hosts_in_cluster(id)
+            hosts = []
+            keys = ['id',
+                    'clusterId',
+                    'clusterName',
+                    'name',  # ip
+                    'logicalProcessor',
+                    'cpuUsage',
+                    'totalMem',
+                    'memoryUsage',
+                    'pnicNum',
+                    'status']
+            for ics_host in ics_hosts:
+                host = {}
+                for k in keys:
+                    host[k] = ics_host.get(k)
+                host['ip'] = ics_host.get('name')
+                host['totalMem'] = int(round(ics_host.get('totalMem')))
+                hosts.append(host)
+            return dict(hosts=hosts, error='')
+        except Exception as e:
+            return dict(hosts=[], error=e.message)
 
 
 class Clusters(extensions.V21APIExtensionBase):

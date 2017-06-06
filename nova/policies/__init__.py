@@ -34,6 +34,7 @@ from nova.policies import console_auth_tokens
 from nova.policies import console_output
 from nova.policies import consoles
 from nova.policies import create_backup
+from nova.policies import mem_snapshots
 from nova.policies import deferred_delete
 from nova.policies import evacuate
 from nova.policies import extended_availability_zone
@@ -100,10 +101,12 @@ from nova.policies import versions
 from nova.policies import virtual_interfaces
 from nova.policies import volumes
 from nova.policies import volumes_attachments
-
+from nova.policies import wstvms
+from nova.policies import ics_vm
 
 def list_rules():
     return itertools.chain(
+        wstvms.list_rules(),
         admin_actions.list_rules(),
         admin_password.list_rules(),
         agents.list_rules(),
@@ -125,6 +128,7 @@ def list_rules():
         console_output.list_rules(),
         consoles.list_rules(),
         create_backup.list_rules(),
+        mem_snapshots.list_rules(),
         deferred_delete.list_rules(),
         evacuate.list_rules(),
         extended_availability_zone.list_rules(),
@@ -190,5 +194,6 @@ def list_rules():
         versions.list_rules(),
         virtual_interfaces.list_rules(),
         volumes.list_rules(),
-        volumes_attachments.list_rules()
+        volumes_attachments.list_rules(),
+        ics_vm.list_rules()
     )

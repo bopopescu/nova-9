@@ -40,6 +40,12 @@ IMAGE_UPLOADING = fields.InstanceTaskState.IMAGE_UPLOADING
 # possible task states during backup()
 IMAGE_BACKUP = fields.InstanceTaskState.IMAGE_BACKUP
 
+# possible task states during create_mem_snapshots()
+MEMORY_SNAPSHOTS = fields.InstanceTaskState.MEMORY_SNAPSHOTS
+
+# possible task states during restore_mem_snapshots()
+RESTORE_MEMORY_SNAPSHOTS = fields.InstanceTaskState.RESTORE_MEMORY_SNAPSHOTS
+
 # possible task states during set_admin_password()
 UPDATING_PASSWORD = fields.InstanceTaskState.UPDATING_PASSWORD
 
