@@ -37,3 +37,4 @@ ics_vm_policies = [
 
 def list_rules():
     return ics_vm_policies
+
