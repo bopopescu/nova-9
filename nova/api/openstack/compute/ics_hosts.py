@@ -33,13 +33,35 @@ class IcsHostsController(wsgi.Controller):
     """The ICS Nodes API controller for the OpenStack API."""
 
     def __init__(self):
-        self.ics_manager = session.get_session()
+        self.ics_manager = None
+        self._get_ics_session()
         super(IcsHostsController, self).__init__()
+    
+    def _get_ics_session(self):
+        if self.ics_manager:
+            return True
+        try:
+            self.ics_manager = session.get_session()
+            return True
+        except:
+            self.ics_manager = None
+            return False 
 
     @extensions.expected_errors(404)
     def vms(self, req, id):
+
+        if not self._get_ics_session():
+            return dict(vms=[], error='CANNOT_CONNECT_ICS')
+
+        if not id:
+            return dict(vms=[], error='HOST_ID_NULL')
+
+        ics_host = self.ics_manager.host.get_host(id)
+        tmp = ics_host.get('message')
+        if tmp:
+            return dict(vms=[], error='HOST_NOT_EXIST')
+
         ics_vms = self.ics_manager.vm.get_vms_in_host(id)
-        print ics_vms
         vms = []
         keys = ['id', 'name', 'status', 'cpuNum', 'memory', 'disks',
                 'nics', 'hostId', 'hostName']
@@ -48,8 +70,6 @@ class IcsHostsController(wsgi.Controller):
             for k in keys:
                 vm[k] = ics_vm.get(k)
             vms.append(vm)
-        print '-------------------------------------------------------'
-        print vms
         return dict(vms=vms)
 
 
