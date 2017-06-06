@@ -22,7 +22,7 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:ics_vm'
-POLICY_ROOT = 'os_compute_api:ics-vm:%s'
+POLICY_ROOT = 'os_compute_api:os-ics-vm:%s'
 
 
 ics_vm_policies = [
