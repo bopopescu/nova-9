@@ -4205,13 +4205,19 @@ class ComputeManager(manager.Manager):
             compute_utils.notify_about_instance_action(context, instance,
                                                        self.host, action=fields.NotificationAction.RESIZE,
                                                        phase=fields.NotificationPhase.START)
+
+            bdms = objects.BlockDeviceMappingList.get_by_instance_uuid(
+                context, instance.uuid)
+            block_device_info = self._get_instance_block_device_info(
+                context, instance, bdms=bdms)
             disk_info = None
-
-            # bdms = objects.BlockDeviceMappingList.get_by_instance_uuid(
-            #     context, instance.uuid)
-            # block_device_info = self._get_instance_block_device_info(
-            #     context, instance, bdms=bdms)
-
+            # disk_info_text = self.driver.get_instance_disk_info(
+            #     instance, block_device_info=block_device_info)
+            # disk_info = jsonutils.loads(disk_info_text)
+            # LOG.debug("disk_info=%s" % str(disk_info))            # disk_info_text = self.driver.get_instance_disk_info(
+            #     instance, block_device_info=block_device_info)
+            # disk_info = jsonutils.loads(disk_info_text)
+            # LOG.debug("disk_info=%s" % str(disk_info))
             # timeout, retry_interval = self._get_power_off_values(context,
             #                                                      # instance, clean_shutdown)
             # disk_info = self.driver.migrate_disk_and_power_off(
@@ -4317,6 +4323,8 @@ class ComputeManager(manager.Manager):
         power_on = old_vm_state != vm_states.STOPPED
 
         try:
+            # LOG.debug("disk_info=%s" % str(disk_info))
+            # LOG.debug("block_device_info=%s" % str(block_device_info))
             self.driver.finish_migration(context, migration, instance,
                                          disk_info,
                                          network_info,
@@ -4363,6 +4371,8 @@ class ComputeManager(manager.Manager):
                                                   instance=instance)
         try:
             image_meta = objects.ImageMeta.from_dict(image)
+            # LOG.debug("finish_resize disk_info=%s" % str(disk_info))
+            # LOG.debug("finish_resize image_meta=%s" % str(image_meta))
             self._finish_resize(context, instance, migration,
                                 disk_info, image_meta)
             quotas.commit()
@@ -4383,6 +4393,8 @@ class ComputeManager(manager.Manager):
         resize_instance = False
         old_instance_type_id = migration['old_instance_type_id']
         new_instance_type_id = migration['new_instance_type_id']
+        LOG.debug("old_instance_type_id=%d" % old_instance_type_id)
+        LOG.debug("new_instance_type_id=%d" % new_instance_type_id)
         old_instance_type = instance.get_flavor()
         # NOTE(mriedem): Get the old_vm_state so we know if we should
         # power on the instance. If old_vm_state is not set we need to default
@@ -4444,19 +4456,25 @@ class ComputeManager(manager.Manager):
                 vm_id = instance.uuid
                 new_cpu_num = instance_type.vcpus
                 new_mem_num = instance_type.memory_mb
-                LOG.info(_LI("ICS_SDK hotplug_vm start..."))
-                LOG.info(_LI("vm_id=%s, new_cpu_num=%d, new_mem_num=%d" % (vm_id, new_cpu_num, new_mem_num)))
-                ret = ics_manager.vm.hotplug_vm(vm_id, new_cpu_num, new_mem_num)
+                new_disk_size = instance_type['root_gb']
+                LOG.debug("ICS_SDK hotplug_vm start...")
+                # LOG.debug("disk_info=%s, image_meta=%s" % (str(disk_info), str(image_meta)))
+                LOG.debug("vm_id=%s, new_cpu_num=%d, new_mem_num=%d new_disk_num=%d" %
+                          (vm_id, new_cpu_num, new_mem_num, new_disk_size))
+                ret = ics_manager.vm.hotplug_vm(vm_id, new_cpu_num, new_mem_num, new_disk_size)
                 LOG.info(_LI("ics_manager.vm.hotplug_vm response: %s" % (str(ret))))
 
                 for key in ('root_gb', 'swap', 'ephemeral_gb'):
                     if old_instance_type[key] != instance_type[key]:
                         resize_instance = True
                         break
-                if resize_instance:
-                    # TODO: resize image
-                    pass
-                # save instance after ics operation done.
+                # if resize_instance:
+                #     disk = disk_info[0]
+                #     volume = disk.get('volume', '')
+                #     volume_id = volume.get('id', '')
+                #     volume_size = instance_type['root_gb']
+                #     ret = ics_manager.volume.extend_volume(volume_id, volume_size)
+                #     LOG.info(_LI("ics_manager.volume.extend_vm response: %s" % (str(ret))))
                 self._set_instance_info(instance, instance_type)
 
         except Exception as e:
@@ -4489,7 +4507,7 @@ class ComputeManager(manager.Manager):
     @errors_out_migration
     @wrap_instance_fault
     def finish_live_resize(self, context, disk_info, image, instance,
-                      reservations, migration):
+                           reservations, migration):
         """Completes the migration process.
 
         Sets up the newly transferred disk and turns on the instance at its
@@ -4502,7 +4520,7 @@ class ComputeManager(manager.Manager):
         try:
             image_meta = objects.ImageMeta.from_dict(image)
             self._finish_live_resize(context, instance, migration,
-                                disk_info, image_meta)
+                                     disk_info, image_meta)
             quotas.commit()
         except Exception:
             LOG.exception(_LE('Setting instance vm_state to ERROR'),
@@ -4512,7 +4530,7 @@ class ComputeManager(manager.Manager):
                     quotas.rollback()
                 except Exception:
                     LOG.exception(_LE("Failed to rollback quota for failed "
-                                      "finish_resize"),
+                                      "finish_live_resize"),
                                   instance=instance)
                 self._set_instance_obj_error_state(context, instance)
 
