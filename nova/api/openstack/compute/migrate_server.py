@@ -108,6 +108,35 @@ class MigrateServerController(wsgi.Controller):
         except exception.NoValidHost as e:
             raise exc.HTTPBadRequest(explanation=e.format_message())
 
+    @wsgi.response(202)
+    @extensions.expected_errors((400, 403, 404, 409))
+    @wsgi.action('softShutdown')
+    def _soft_shutdown(self, req, id, body):
+        """Permit power off a vm securitily."""
+        context = req.environ['nova.context']
+
+        softShutdown = body["softShutdown"]
+        
+        instance = common.get_instance(self.compute_api, context, id)
+        try:
+            result = self.ics_manager.vm.soft_shutdown_vm(id)
+            res = {'success': True, "vmId": id, "result": result}
+            return dict(softShutdown = res)
+#            body = self.ics_manager.vm.get_info(self, '0557ec0b_4e52_4228_a067_e6a7699ebe97') 
+#            result = self.ics_manager.host.get_host('5d85f39c-ef38-4bc3-991a-6f250b32221f')   
+#            print json.dumps(result) + "\n\n"            
+        except (exception.TooManyInstances, exception.QuotaError) as e:
+            raise exc.HTTPForbidden(explanation=e.format_message())
+        except exception.InstanceIsLocked as e:
+            raise exc.HTTPConflict(explanation=e.format_message())
+        except exception.InstanceInvalidState as state_error:
+            common.raise_http_conflict_for_instance_invalid_state(state_error,
+                    'softShutdown', id)
+        except exception.InstanceNotFound as e:
+            raise exc.HTTPNotFound(explanation=e.format_message())
+        except exception.NoValidHost as e:
+            raise exc.HTTPBadRequest(explanation=e.format_message())
+
 
     @wsgi.response(202)
     @extensions.expected_errors((400, 404, 409))

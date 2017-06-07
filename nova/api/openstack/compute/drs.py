@@ -17,6 +17,8 @@ from nova.api.openstack import extensions
 from nova.api.openstack import wsgi
 from nova.api.openstack.compute.views import hypervisors as hyper_view
 from ics_sdk import session as ics_session
+from nova.api import validation
+from nova.api.openstack.compute.schemas import drs
 
 LOG = logging.getLogger(__name__)
 
@@ -28,14 +30,21 @@ class DRSController(wsgi.Controller):
     _view_builder_class = hyper_view.ViewBuilder
 
     def __init__(self):
-        self.ics_manager = ics_session.get_session()
-        super(DRSController, self).__init__()
+        try:
+            self.ics_manager = ics_session.get_session()
+            super(DRSController, self).__init__()
+        except Exception, e:
+            return "Error: ICS get_session! %s" %e
 
     @extensions.expected_errors((400, 404))
+    @validation.schema(drs.setdrs)
     def setdrs(self, req, id, body):
 
         id = id.replace('ics.', '')
-        rs = self.ics_manager.cluster.set_cluster_drs(id, body['value'])
+        try:
+            rs = self.ics_manager.cluster.set_cluster_drs(id, body['value'])
+        except Exception, e:
+            return "Error: ICS set_cluster_drs! %s" %e
 
         re = "False"
         if rs["state"] == "FINISHED":
@@ -44,11 +53,15 @@ class DRSController(wsgi.Controller):
         return re
 
     @extensions.expected_errors((400, 404))
+    @validation.schema(drs.setdrs)
     def setdpm(self, req, id, body):
 
         id = id.replace('ics.', '')
-        self.ics_manager.cluster.set_cluster_drs(id, body['value'])
-        rs = self.ics_manager.cluster.set_cluster_dpm(id, body['value'])
+        try:
+            self.ics_manager.cluster.set_cluster_drs(id, body['value'])
+            rs = self.ics_manager.cluster.set_cluster_dpm(id, body['value'])
+        except Exception, e:
+            return "Error: ICS set_cluster_dpm! %s" %e
 
         re = "False"
         if rs["state"] == "FINISHED":
@@ -60,7 +73,10 @@ class DRSController(wsgi.Controller):
     def checkdrs(self, req, id):
 
         id = id.replace('ics.', '')
-        rs = self.ics_manager.cluster.check_cluster_drsstate(id)
+        try:
+            rs = self.ics_manager.cluster.check_cluster_drsstate(id)
+        except Exception, e:
+            return "Error: ICS check_cluster_drsstate! %s" %e
 
         return str(rs)
 
@@ -68,7 +84,10 @@ class DRSController(wsgi.Controller):
     def checkdpm(self, req, id):
 
         id = id.replace('ics.', '')
-        rs = self.ics_manager.cluster.check_cluster_dpmstate(id)
+        try:
+            rs = self.ics_manager.cluster.check_cluster_dpmstate(id)
+        except Exception, e:
+            return "Error: ICS check_cluster_dpmstate! %s" %e
 
         return str(rs)
 

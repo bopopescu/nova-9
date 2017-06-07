@@ -18,7 +18,7 @@
 
 from ics_sdk import session
 
-# from nova.policies import ics_vm as ics_vm_pl
+from nova.policies import ics_vm as ics_vm_pl
 import webob.exc
 from nova.api.openstack import extensions
 from nova.api.openstack import wsgi
@@ -61,24 +61,28 @@ class IcsVmController(wsgi.Controller):
         data = {'param': 'test'}
         return data
 
-    @extensions.expected_errors(404)
+    @extensions.expected_errors((404, 412, 500))
     @validation.schema(ics_vm.mount)
     def mount(self, req, body):
         """mount iso to vm """
         context = req.environ['nova.context']
+        context.can(ics_vm_pl.BASE_POLICY_NAME)
         vmid = body['vmid']
         isoid = body['isoid']
-        self._validate_image(context, isoid)
+        image = self._validate_image(context, isoid)
+        if image.get('disk_format')!= 'iso' and image.get('disk_format')!= 'ISO' :
+            explanation = _("diskformat must be iso.")
+            raise webob.exc.HTTPPreconditionFailed(explanation=explanation)
         self._validate_vm(context, vmid)
         # do ics-vm mount iso
-        LOG.info("begin to mount iso to ics_vm")
+        LOG.info("begin to mount iso to ics_vm : %s", vmid)
         try:
             task_info = self._ics_manager.vm.attach_cdrom(vm_id=vmid, isoid=isoid)
         except Exception as e:
             # do something
             LOG.error("mount iso to ics_vm exception : " + e.message)
-            pass
-        LOG.info("end to mount iso to ics_vm")
+            raise webob.exc.HTTPServerError(explanation=e.message)
+        LOG.info("end to mount iso to ics_vm : %s", vmid)
         state = task_info['state']
         if state == 'FINISHED':
             res = {'success': True}
@@ -87,11 +91,12 @@ class IcsVmController(wsgi.Controller):
 
         return dict(vmMount=res)
 
-    @extensions.expected_errors(404)
+    @extensions.expected_errors((404, 500))
     @validation.schema(ics_vm.unmount)
     def unmount(self, req, body):
         """unmount iso to vm """
         context = req.environ['nova.context']
+        context.can(ics_vm_pl.BASE_POLICY_NAME)
         vmid = body['vmid']
         self._validate_vm(context, vmid)
         # do ics-vm unmount iso
@@ -101,7 +106,7 @@ class IcsVmController(wsgi.Controller):
         except Exception as e:
             # do something
             LOG.error("unmount iso to ics_vm exception : " + e.message)
-            pass
+            raise webob.exc.HTTPServerError(explanation=e.message)
         LOG.info("end to unmount iso to ics_vm")
         state = task_info['state']
         if state == 'FINISHED':
