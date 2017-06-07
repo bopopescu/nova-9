@@ -61,7 +61,7 @@ class IcsVmController(wsgi.Controller):
         data = {'param': 'test'}
         return data
 
-    @extensions.expected_errors((404, 403))
+    @extensions.expected_errors((404, 412, 500))
     @validation.schema(ics_vm.mount)
     def mount(self, req, body):
         """mount iso to vm """
@@ -71,7 +71,8 @@ class IcsVmController(wsgi.Controller):
         isoid = body['isoid']
         image = self._validate_image(context, isoid)
         if image.get('disk_format')!= 'iso' and image.get('disk_format')!= 'ISO' :
-            raise webob.exc.HTTPForbidden(explanation='diskformat must be iso')
+            explanation = _("diskformat must be iso.")
+            raise webob.exc.HTTPPreconditionFailed(explanation=explanation)
         self._validate_vm(context, vmid)
         # do ics-vm mount iso
         LOG.info("begin to mount iso to ics_vm : %s", vmid)
@@ -80,7 +81,7 @@ class IcsVmController(wsgi.Controller):
         except Exception as e:
             # do something
             LOG.error("mount iso to ics_vm exception : " + e.message)
-            pass
+            raise webob.exc.HTTPServerError(explanation=e.message)
         LOG.info("end to mount iso to ics_vm : %s", vmid)
         state = task_info['state']
         if state == 'FINISHED':
@@ -90,7 +91,7 @@ class IcsVmController(wsgi.Controller):
 
         return dict(vmMount=res)
 
-    @extensions.expected_errors(404)
+    @extensions.expected_errors((404, 500))
     @validation.schema(ics_vm.unmount)
     def unmount(self, req, body):
         """unmount iso to vm """
@@ -105,7 +106,7 @@ class IcsVmController(wsgi.Controller):
         except Exception as e:
             # do something
             LOG.error("unmount iso to ics_vm exception : " + e.message)
-            pass
+            raise webob.exc.HTTPServerError(explanation=e.message)
         LOG.info("end to unmount iso to ics_vm")
         state = task_info['state']
         if state == 'FINISHED':
