@@ -41,19 +41,17 @@ class MigrateServerController(wsgi.Controller):
     def __init__(self, *args, **kwargs):
         super(MigrateServerController, self).__init__(*args, **kwargs)
         self.compute_api = compute.API()
-        self.ics_manager = session.get_session()
-        # ics info
-#        Loginconf = user_config.InspurConf()
-#        user_info = Loginconf.init_conf_file()
-#        user = user_info['SDK']['user']
-#        password = user_info['SDK']['password']
-#        url = user_info['SDK']['url']
-#        self.ics_manager = manager.Manager(user, password, url)
-#        user = 'admin'
-#        passwd = 'admin@inspur'
-#        icsip = 'https://100.2.30.85'
-#        self.ics_manager = manager.Manager(user, passwd, icsip)
+        self.ics_manager = None
 
+    def _get_ics_session(self):
+        if self.ics_manager:
+            return True
+        try:
+            self.ics_manager = session.get_session()
+            return True
+        except:
+            self.ics_manager = None
+            return False 
 
     @wsgi.response(202)
     @extensions.expected_errors((400, 403, 404, 409))
@@ -82,13 +80,16 @@ class MigrateServerController(wsgi.Controller):
     @extensions.expected_errors((400, 403, 404, 409))
     @wsgi.action('migrateExtend')
     def _migrate_extend(self, req, id, body):
-        """Permit admins to migrate a server to a new host."""
-        context = req.environ['nova.context']
-
-#        nodeSource = body["migrateExtend"]["nodeSource"]
-        nodeTarget = body["migrateExtend"]["nodeTarget"]
+        """Permit admin to migrate a server to a new host lively."""       
+        if not self._get_ics_session():
+             return dict(vms=[], error='CANNOT_CONNECT_ICS') 
+         
+        if not id:
+            return dict(vms=[], error='VM_ID_NULL')
         
-        instance = common.get_instance(self.compute_api, context, id)
+        context = req.environ['nova.context']
+        nodeTarget = body["migrateExtend"]["nodeTarget"]
+#        instance = common.get_instance(self.compute_api, context, id)
         try:
             result = self.ics_manager.vm.live_migrate(id, nodeTarget)
             res = {'success': True, "vmId": id, "hostId": nodeTarget, "result": result}
@@ -113,11 +114,16 @@ class MigrateServerController(wsgi.Controller):
     @wsgi.action('softShutdown')
     def _soft_shutdown(self, req, id, body):
         """Permit power off a vm securitily."""
-        context = req.environ['nova.context']
-
-        softShutdown = body["softShutdown"]
+        if not self._get_ics_session():
+             return dict(vms=[], error='CANNOT_CONNECT_ICS') 
+         
+        if not id:
+            return dict(vms=[], error='VM_ID_NULL')
         
-        instance = common.get_instance(self.compute_api, context, id)
+        context = req.environ['nova.context']
+        softShutdown = body["softShutdown"]
+                
+#        instance = common.get_instance(self.compute_api, context, id)
         try:
             result = self.ics_manager.vm.soft_shutdown_vm(id)
             res = {'success': True, "vmId": id, "result": result}
