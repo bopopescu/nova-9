@@ -915,7 +915,7 @@ Possible values:
 * Any positive integer in seconds: Enables the option.
 """),
     cfg.IntOpt("live_resize_confirm_window",
-        default=1,
+        default=0,
         min=0,
         help="""
 Automatically confirm resizes after N seconds.
@@ -930,7 +930,7 @@ server is in resized state longer than that time.
 
 Possible values:
 
-* 0: Disables the option(default=1)
+* 0: Disables the option(default)
 * Any positive integer in seconds: Enables the option.
 """),
     cfg.IntOpt("shutdown_timeout",
