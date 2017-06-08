@@ -16,7 +16,7 @@ import itertools
 from nova.policies import admin_actions
 from nova.policies import admin_password
 from nova.policies import agents
-from nova.policies import aggregates
+from nova.policies import aggregates	
 from nova.policies import assisted_volume_snapshots
 from nova.policies import attach_interfaces
 from nova.policies import availability_zone
@@ -102,11 +102,13 @@ from nova.policies import virtual_interfaces
 from nova.policies import volumes
 from nova.policies import volumes_attachments
 from nova.policies import wstvms
+from nova.policies import wsthost
 from nova.policies import ics_vm
 
 def list_rules():
     return itertools.chain(
         wstvms.list_rules(),
+        wsthost.list_rules(),
         admin_actions.list_rules(),
         admin_password.list_rules(),
         agents.list_rules(),
