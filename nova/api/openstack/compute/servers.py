@@ -1047,11 +1047,15 @@ class ServersController(wsgi.Controller):
         self._resize(req, id, flavor_ref, **kwargs)
 
     def _live_resize_switch(self, id, status):
+        status = str(status).lower()
+        if status not in ("on", "off"):
+            raise Exception("switch status value error")
+
         from ics_sdk import session
         try:
             ics_manager = session.get_session()
-            # ret = ics_manager.vm.enable_hotplugin(id, status)
-            # LOG.debug(str(ret))
+            ret = ics_manager.vm.modify_hotplugin(id, status)
+            LOG.debug(str(ret))
             LOG.debug("_live_resize_switch")
         except Exception as e:
             LOG.exception(e)
