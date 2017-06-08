@@ -67,6 +67,7 @@ class ServersController(wsgi.Controller):
     schema_server_rebuild = schema_servers.base_rebuild
     schema_server_resize = schema_servers.base_resize
     schema_server_live_resize = schema_servers.base_live_resize
+    schema_server_live_resize_switch = schema_servers.base_live_resize_switch
 
     schema_server_create_v20 = schema_servers.base_create_v20
     schema_server_update_v20 = schema_servers.base_update_v20
@@ -850,6 +851,29 @@ class ServersController(wsgi.Controller):
             common.raise_http_conflict_for_instance_invalid_state(state_error,
                     'confirmResize', id)
 
+    # NOTE(gmann): Returns 204 for backwards compatibility but should be 202
+    # for representing async API as this API just accepts the request and
+    # request hypervisor driver to complete the same in async mode.
+    @wsgi.response(204)
+    @extensions.expected_errors((400, 404, 409))
+    @wsgi.action('confirm_live_resize')
+    def _action_confirm_live_resize(self, req, id, body):
+        context = req.environ['nova.context']
+        context.can(server_policies.SERVERS % 'confirm_live_resize')
+        instance = self._get_server(context, req, id)
+        try:
+            self.compute_api.confirm_live_resize(context, instance)
+        except exception.InstanceUnknownCell as e:
+            raise exc.HTTPNotFound(explanation=e.format_message())
+        except exception.MigrationNotFound:
+            msg = _("Instance has not been resized.")
+            raise exc.HTTPBadRequest(explanation=msg)
+        except exception.InstanceIsLocked as e:
+            raise exc.HTTPConflict(explanation=e.format_message())
+        except exception.InstanceInvalidState as state_error:
+            common.raise_http_conflict_for_instance_invalid_state(state_error,
+                    'confirm_live_resize', id)
+
     @wsgi.response(202)
     @extensions.expected_errors((400, 404, 409))
     @wsgi.action('revertResize')
@@ -1021,6 +1045,31 @@ class ServersController(wsgi.Controller):
         helpers.translate_attributes(helpers.RESIZE, resize_dict, kwargs)
 
         self._resize(req, id, flavor_ref, **kwargs)
+
+    def _live_resize_switch(self, id, status):
+        from ics_sdk import session
+        try:
+            ics_manager = session.get_session()
+            # ret = ics_manager.vm.enable_hotplugin(id, status)
+            # LOG.debug(str(ret))
+            LOG.debug("_live_resize_switch")
+        except Exception as e:
+            LOG.exception(e)
+            raise e
+
+    @wsgi.response(202)
+    @extensions.expected_errors((400, 401, 403, 404, 409))
+    @wsgi.action('live_resize_switch')
+    @validation.schema(schema_server_live_resize_switch)
+    def _action_live_resize_switch(self, req, id, body):
+        """Resizes a given instance to the flavor size requested."""
+        resize_dict = body['live_resize_switch']
+        status = str(resize_dict["status"])
+
+        kwargs = {}
+        helpers.translate_attributes(helpers.RESIZE, resize_dict, kwargs)
+
+        self._live_resize_switch(id, status)
 
     @wsgi.response(202)
     @extensions.expected_errors((400, 401, 403, 404, 409))

@@ -223,6 +223,22 @@ base_live_resize = {
     'additionalProperties': False,
 }
 
+base_live_resize_switch = {
+    'type': 'object',
+    'properties': {
+        'live_resize_switch': {
+            'type': 'object',
+            'properties': {
+                'status': parameter_types.boolean,
+            },
+            'required': ['status'],
+            'additionalProperties': False,
+        },
+    },
+    'required': ['live_resize_switch'],
+    'additionalProperties': False,
+}
+
 create_image = {
     'type': 'object',
     'properties': {
