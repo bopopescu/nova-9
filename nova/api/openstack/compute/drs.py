@@ -50,7 +50,7 @@ class DRSController(wsgi.Controller):
         if rs["state"] == "FINISHED":
             re = "True"
 
-        return re
+        return {'setdrs%s'  %(body['value'] == 'True' and 'On' or 'Off'): re}
 
     @extensions.expected_errors((400, 404))
     @validation.schema(drs.setdrs)
@@ -67,7 +67,7 @@ class DRSController(wsgi.Controller):
         if rs["state"] == "FINISHED":
             re = "True"
 
-        return re
+        return {'setdpm%s' %(body['value'] == 'True' and 'On' or 'Off'): re}
 
     @extensions.expected_errors((400, 404))
     def checkdrs(self, req, id):
@@ -78,7 +78,7 @@ class DRSController(wsgi.Controller):
         except Exception, e:
             return "Error: ICS check_cluster_drsstate! %s" %e
 
-        return str(rs)
+        return {'checkdrs': rs and 'On' or 'Off'}
 
     @extensions.expected_errors((400, 404))
     def checkdpm(self, req, id):
@@ -89,7 +89,7 @@ class DRSController(wsgi.Controller):
         except Exception, e:
             return "Error: ICS check_cluster_dpmstate! %s" %e
 
-        return str(rs)
+        return {'checkdpm': rs and 'On' or 'Off'}
 
 
 class DRSClass(extensions.V21APIExtensionBase):
