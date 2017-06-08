@@ -36,6 +36,7 @@ from nova.policies import consoles
 from nova.policies import create_backup
 from nova.policies import mem_snapshots
 from nova.policies import deferred_delete
+from nova.policies import drs
 from nova.policies import evacuate
 from nova.policies import extended_availability_zone
 from nova.policies import extended_server_attributes
@@ -132,6 +133,7 @@ def list_rules():
         create_backup.list_rules(),
         mem_snapshots.list_rules(),
         deferred_delete.list_rules(),
+        drs.list_rules(),
         evacuate.list_rules(),
         extended_availability_zone.list_rules(),
         extended_server_attributes.list_rules(),

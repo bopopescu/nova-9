@@ -17,6 +17,7 @@ from nova.api.openstack import extensions
 from nova.api.openstack import wsgi
 from nova.api.openstack.compute.views import hypervisors as hyper_view
 from ics_sdk import session as ics_session
+from nova.policies import drs as cl_policies
 from nova.api import validation
 from nova.api.openstack.compute.schemas import drs
 
@@ -40,6 +41,8 @@ class DRSController(wsgi.Controller):
     @validation.schema(drs.setdrs)
     def setdrs(self, req, id, body):
 
+        context = req.environ['nova.context']
+        context.can(cl_policies.BASE_POLICY_NAME)
         id = id.replace('ics.', '')
         try:
             rs = self.ics_manager.cluster.set_cluster_drs(id, body['value'])
@@ -56,6 +59,8 @@ class DRSController(wsgi.Controller):
     @validation.schema(drs.setdrs)
     def setdpm(self, req, id, body):
 
+        context = req.environ['nova.context']
+        context.can(cl_policies.BASE_POLICY_NAME)
         id = id.replace('ics.', '')
         try:
             self.ics_manager.cluster.set_cluster_drs(id, body['value'])
@@ -72,6 +77,8 @@ class DRSController(wsgi.Controller):
     @extensions.expected_errors((400, 404))
     def checkdrs(self, req, id):
 
+        context = req.environ['nova.context']
+        context.can(cl_policies.BASE_POLICY_NAME)
         id = id.replace('ics.', '')
         try:
             rs = self.ics_manager.cluster.check_cluster_drsstate(id)
@@ -83,6 +90,8 @@ class DRSController(wsgi.Controller):
     @extensions.expected_errors((400, 404))
     def checkdpm(self, req, id):
 
+        context = req.environ['nova.context']
+        context.can(cl_policies.BASE_POLICY_NAME)
         id = id.replace('ics.', '')
         try:
             rs = self.ics_manager.cluster.check_cluster_dpmstate(id)
