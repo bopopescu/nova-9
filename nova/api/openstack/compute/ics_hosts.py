@@ -22,7 +22,7 @@ from nova.api.openstack import wsgi
 
 from ics_sdk import session
 from ics_sdk.utils import log
-import json
+from nova.policies import ics_hosts as h_policies
 
 LOG = logging.getLogger(__name__)
 
@@ -49,7 +49,8 @@ class IcsHostsController(wsgi.Controller):
 
     @extensions.expected_errors(404)
     def vms(self, req, id):
-
+        context = req.environ['nova.context']
+        context.can(h_policies.BASE_POLICY_NAME)
         if not self._get_ics_session():
             return dict(vms=[], error='CANNOT_CONNECT_ICS')
 
@@ -71,6 +72,36 @@ class IcsHostsController(wsgi.Controller):
                 vm[k] = ics_vm.get(k)
             vms.append(vm)
         return dict(vms=vms)
+
+    @extensions.expected_errors(404)
+    def show(self, req, id):
+        try:
+            context = req.environ['nova.context']
+            context.can(h_policies.BASE_POLICY_NAME)
+            if not self._get_ics_session():
+                return dict(detail={}, error='CANNOT_CONNECT_ICS')
+    
+            ics_host = self.ics_manager.host.get_host(id)
+            tmp = ics_host.get('message')
+            if tmp:
+                return dict(detail={}, error='HOST_NOT_EXIST')
+            keys = ['id',
+                    'clusterId',
+                    'clusterName',
+                    'name',  # ip
+                    'logicalProcessor',
+                    'cpuUsage',
+                    'totalMem',
+                    'memoryUsage',
+                    'pnicNum',
+                    'status']
+            host = {}
+            for k in keys:
+                host[k] = ics_host.get(k)
+            host['ip'] = ics_host.get('name')
+            return dict(host=host, error="")
+        except Exception as e:
+            return dict(host={}, error=e.message)
 
 
 class IcsHosts(extensions.V21APIExtensionBase):
