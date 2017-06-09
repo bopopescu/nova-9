@@ -51,7 +51,9 @@ class IcsVmController(wsgi.Controller):
 
     def __init__(self):
         """init work"""
-        self._ics_manager = session.get_session()
+        #  self._ics_manager = session.get_session()
+        self._ics_manager = None
+        self._get_ics_session()
         self._compute_api = compute.API()
         self._image_api = nova.image.API()
         super(IcsVmController, self).__init__()
@@ -60,6 +62,17 @@ class IcsVmController(wsgi.Controller):
     def index(self, req):
         data = {'param': 'test'}
         return data
+  
+    def _get_ics_session(self):
+        if self._ics_manager:
+            return True
+        try:
+            self._ics_manager = session.get_session()
+            return True
+        except:
+            self._ics_manager = None
+            return False
+    
 
     @extensions.expected_errors((404, 412, 500))
     @validation.schema(ics_vm.mount)
@@ -69,6 +82,9 @@ class IcsVmController(wsgi.Controller):
         context.can(ics_vm_pl.BASE_POLICY_NAME)
         vmid = body['vmid']
         isoid = body['isoid']
+        if not self._get_ics_session():
+            raise webob.exc.HTTPServerError(explanation="ics connect failed !")
+
         image = self._validate_image(context, isoid)
         if image.get('disk_format')!= 'iso' and image.get('disk_format')!= 'ISO' :
             explanation = _("diskformat must be iso.")
@@ -97,6 +113,9 @@ class IcsVmController(wsgi.Controller):
         """unmount iso to vm """
         context = req.environ['nova.context']
         context.can(ics_vm_pl.BASE_POLICY_NAME)
+        if not self._get_ics_session():
+            raise webob.exc.HTTPServerError(explanation="ics connect failed !")
+        
         vmid = body['vmid']
         self._validate_vm(context, vmid)
         # do ics-vm unmount iso
