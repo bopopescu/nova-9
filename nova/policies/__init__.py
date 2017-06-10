@@ -73,6 +73,7 @@ from nova.policies import multinic
 from nova.policies import multiple_create
 from nova.policies import networks
 from nova.policies import networks_associate
+from nova.policies import panick_policy
 from nova.policies import pause_server
 from nova.policies import pci
 from nova.policies import quota_class_sets
@@ -171,6 +172,7 @@ def list_rules():
         multiple_create.list_rules(),
         networks.list_rules(),
         networks_associate.list_rules(),
+        panick_policy.list_rules(),
         pause_server.list_rules(),
         pci.list_rules(),
         quota_class_sets.list_rules(),
