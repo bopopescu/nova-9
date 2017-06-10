@@ -45,6 +45,9 @@ from nova.image import glance
 from nova import objects
 from nova.policies import servers as server_policies
 from nova import utils
+from nova.volume import cinder
+import time
+from nova.image import api
 
 ALIAS = 'servers'
 TAG_SEARCH_FILTERS = ('tags', 'tags-any', 'not-tags', 'not-tags-any')
@@ -151,6 +154,8 @@ class ServersController(wsgi.Controller):
         self.extension_info = kwargs.pop('extension_info')
         super(ServersController, self).__init__(**kwargs)
         self.compute_api = compute.API()
+        self.volume_api = cinder.API()
+        self.image_api = api.API()
 
         # Look for implementation of extension point of server creation
         self.create_extension_manager = \
@@ -534,7 +539,8 @@ class ServersController(wsgi.Controller):
         """Creates a new server for a given user."""
 
         context = req.environ['nova.context']
-        server_dict = body['server']
+        server_dict = body['server']       
+        
         password = self._get_server_admin_password(server_dict)
         name = common.normalize_name(server_dict['name'])
 
@@ -556,7 +562,39 @@ class ServersController(wsgi.Controller):
             ics_node = body['ics_node']
         else:
             ics_node = None
-
+        image_id = server_dict['imageRef']
+        image_info = self.image_api.get(context, image_id, False, True)
+#        return {"imageInfo": image_info}
+        image_size_true = image_info['size']
+        # the 'size' is marked as byte, so change to Gb
+        image_size_transfor = image_size_true/1024/1024/1024 + 1
+        volume_id = None
+        if server_dict.has_key('volume_type'):
+            volume_type = server_dict['volume_type']
+            detail = {}
+            detail['boot_index'] = '0'
+#            detail['uuid'] = '5aa587bd-2b70-4b7c-af51-c895b83d2e1f'
+            detail['source_type'] = 'volume'
+            detail['volume_size'] = image_size_transfor
+            detail['destination_type'] = 'volume'
+            detail['delete_on_termination'] = True
+            size = 1
+            volume_name = 'for_vm_' + server_dict['name']
+            volume_description = 'for create vm'
+#            "block_device_mapping_v2":[{"boot_index":"0","uuid":"92d24d7e-a634-402b-9717-88d694a9dff9","source_type":"volume",
+#                                        "volume_size":"1","destination_type":"volume","delete_on_termination":true}],
+#            new_volume = self.volume_api.create(context, size, name, description, **kwargs)
+            new_volume = self.volume_api.create(context, size, volume_name, volume_description, None, image_id,
+                                                volume_type, None, server_dict['availability_zone'])
+#            create(self, context, size, name, description, snapshot=None,
+#               image_id=None, volume_type=None, metadata=None,
+#               availability_zone=None)
+            volume_id = new_volume['id']
+            detail['uuid'] = new_volume['id']
+            server_dict["block_device_mapping_v2"] = [detail]
+#            body['server'] = server_dict
+        else:
+            volume_type = None
         # Query extensions which want to manipulate the keyword
         # arguments.
         # NOTE(cyeoh): This is the hook that extensions use
@@ -605,9 +643,78 @@ class ServersController(wsgi.Controller):
                 if bdm.get('tag', None) and not supports_device_tagging:
                     msg = _('Block device tags are not yet supported.')
                     raise exc.HTTPBadRequest(explanation=msg)
-
+        
         image_uuid = self._image_from_req_data(server_dict, create_kwargs)
-
+        
+        # add image create info, the import thing is change the image_uuid
+        if server_dict.has_key('volume_type'):
+            volume_type = server_dict['volume_type']         
+        else:
+            volume_type = None
+#        volume_id = None;                        
+        if volume_type:
+#            return {'hello': create_kwargs}
+            # create a image use the 'imageRef' and 'storage_type'     
+            LOG.debug('volume_type---------------: %s', volume_type)      
+#            kwargs = {}
+#            kwargs['volume_type'] = volume_type
+#            kwargs['imageRef'] = image_uuid
+#            kwargs['metadata'] = None
+##            kwargs['snapshot_id'] = None
+#            kwargs['source_volume'] = None
+##            kwargs['source_replica'] = None
+##            kwargs['consistencygroup_id'] = None
+#            kwargs['availability_zone'] = server_dict['availability_zone']
+##            kwargs['scheduler_hints'] = volume.get('scheduler_hints', None)
+#            kwargs['multiattach'] = False            
+#            size = 1
+#            volume_name = 'for_vm_' + server_dict['name']
+#            volume_description = 'for create vm'
+##            "block_device_mapping_v2":[{"boot_index":"0","uuid":"92d24d7e-a634-402b-9717-88d694a9dff9","source_type":"volume",
+##                                        "volume_size":"1","destination_type":"volume","delete_on_termination":true}],
+##            new_volume = self.volume_api.create(context, size, name, description, **kwargs)
+#            new_volume = self.volume_api.create(context, size, volume_name, volume_description, None, image_id,
+#                                                volume_type, None, server_dict['availability_zone'])
+##            create(self, context, size, name, description, snapshot=None,
+##               image_id=None, volume_type=None, metadata=None,
+##               availability_zone=None)
+#            volume_id = new_volume['id']
+            # add volume type more details
+#            detail = {}
+#            detail['boot_index'] = '0'
+#            detail['uuid'] = new_volume['id']
+#            detail['source_type'] = 'volume'
+#            detail['volume_size'] = size
+#            detail['destination_type'] = 'volume'
+#            detail['delete_on_termination'] = True
+#            server_dict["block_device_mapping_v2"] = [detail]
+#            body['server'] = server_dict
+            # update the image_uuid info with the 'new' server_dict
+#            if list(self.create_extension_manager):
+#                self.create_extension_manager.map(self._create_extension_point,
+#                                              server_dict, create_kwargs, body)
+#            helpers.translate_attributes(helpers.CREATE,
+#                                     server_dict, create_kwargs)
+#            block_device_mapping = create_kwargs.get("block_device_mapping")
+#            # TODO(Shao He, Feng) move this policy check to os-block-device-mapping
+#            # extension after refactor it.
+#            if block_device_mapping:
+#                context.can(server_policies.SERVERS % 'create:attach_volume',
+#                        target)
+#                for bdm in block_device_mapping:
+#                    if bdm.get('tag', None) and not supports_device_tagging:
+#                        msg = _('Block device tags are not yet supported.')
+#                        raise exc.HTTPBadRequest(explanation=msg)        
+#            image_uuid = self._image_from_req_data(server_dict, create_kwargs)
+#            retval = self._view_builder.detail(req, new_volume)
+#            image_uuid = new_volume['id']
+        # judge the volume's status info, when is available, then break
+        while True:
+            volume_info = self.volume_api.get(context, volume_id)
+            if volume_info['status'] == 'available':
+#                image_uuid = volume_info['id']
+#                return {"volume_info": volume_info}
+                break                        
         # NOTE(cyeoh): Although an extension can set
         # return_reservation_id in order to request that a reservation
         # id be returned to the client instead of the newly created

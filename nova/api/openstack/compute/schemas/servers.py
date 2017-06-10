@@ -31,6 +31,7 @@ base_create = {
                 # volume only. Python code make sure empty string is
                 # not allowed for other cases.
                 'imageRef': parameter_types.image_id_or_empty_string,
+                'volume_type': parameter_types.volume_type,
                 'flavorRef': parameter_types.flavor_ref,
                 'adminPass': parameter_types.admin_password,
                 'metadata': parameter_types.metadata,

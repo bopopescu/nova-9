@@ -299,6 +299,11 @@ volume_id = {
 }
 
 
+volume_type = {
+    'type': 'string',
+}
+
+
 network_id = {
     'type': 'string', 'format': 'uuid'
 }
