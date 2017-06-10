@@ -18,8 +18,8 @@ from oslo_policy import policy
 from nova.policies import base
 
 
-BASE_POLICY_NAME = 'os_compute_api:os-panick-policy'
-POLICY_ROOT = 'os_compute_api:os-panick-policy:%s'
+BASE_POLICY_NAME = 'os_compute_api:panick-policy'
+POLICY_ROOT = 'os_compute_api:panick-policy:%s'
 
 
 panick_policy_policies = [
