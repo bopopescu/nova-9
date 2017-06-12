@@ -584,7 +584,7 @@ class ServersController(wsgi.Controller):
 #            "block_device_mapping_v2":[{"boot_index":"0","uuid":"92d24d7e-a634-402b-9717-88d694a9dff9","source_type":"volume",
 #                                        "volume_size":"1","destination_type":"volume","delete_on_termination":true}],
 #            new_volume = self.volume_api.create(context, size, name, description, **kwargs)
-            new_volume = self.volume_api.create(context, size, volume_name, volume_description, None, image_id,
+            new_volume = self.volume_api.create(context, image_size_transfor, volume_name, volume_description, None, image_id,
                                                 volume_type, None, server_dict['availability_zone'])
 #            create(self, context, size, name, description, snapshot=None,
 #               image_id=None, volume_type=None, metadata=None,
