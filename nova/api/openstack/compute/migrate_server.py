@@ -89,6 +89,10 @@ class MigrateServerController(wsgi.Controller):
         
         context = req.environ['nova.context']
         nodeTarget = body["migrateExtend"]["nodeTarget"]
+        
+        hostInfo = self.ics_manager.host.get_host(nodeTarget)
+        if not hostInfo['id']:
+            return {'success': False, "vmId": id, "hostId": nodeTarget, "result": "HOST IS NULL"}        
 #        instance = common.get_instance(self.compute_api, context, id)
         try:
             result = self.ics_manager.vm.live_migrate(id, nodeTarget)
