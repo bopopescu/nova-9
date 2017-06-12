@@ -3361,6 +3361,15 @@ class API(base.Base):
         if same_instance_type and flavor_id and self.cell_type != 'compute':
             raise exception.CannotResizeToSameFlavor()
 
+        # check flavor
+        if instance.flavor.vcpus > new_instance_type.vcpus:
+            raise exception.FlavorCPUTooSmall()
+        if instance.flavor.memory_mb > new_instance_type.memory_mb:
+            raise exception.FlavorMemoryTooSmall()
+        if instance.flavor.root_gb > new_instance_type.root_gb:
+            reason = _('Resize to smaller disk flavor is not allowed.')
+            raise exception.CannotResizeDisk(reason)
+
         # ensure there is sufficient headroom for upsizes
         if flavor_id:
             deltas = compute_utils.upsize_quota_delta(context,

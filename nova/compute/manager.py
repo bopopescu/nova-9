@@ -4044,14 +4044,6 @@ class ComputeManager(manager.Manager):
             if not self.driver.capabilities['supports_migrate_to_same_host']:
                 raise exception.UnableToMigrateToSelf(
                     instance_id=instance.uuid, host=self.host)
-        # check flavor
-        if instance.flavor.vcpus > instance_type.vcpus:
-            raise exception.FlavorCPUTooSmall()
-        if instance.flavor.memory_mb > instance_type.memory_mb:
-            raise exception.FlavorMemoryTooSmall()
-        if instance.flavor.root_gb > instance_type.root_gb:
-            reason = _('Resize to smaller disk flavor is not allowed.')
-            raise exception.CannotResizeDisk(reason)
 
         # NOTE(danms): Stash the new instance_type to avoid having to
         # look it up in the database later
