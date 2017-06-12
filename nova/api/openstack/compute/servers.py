@@ -655,7 +655,11 @@ class ServersController(wsgi.Controller):
         if volume_type:
 #            return {'hello': create_kwargs}
             # create a image use the 'imageRef' and 'storage_type'     
-            LOG.debug('volume_type---------------: %s', volume_type)      
+            LOG.debug('volume_type---------------: %s', volume_type)
+            while True:
+                volume_info = self.volume_api.get(context, volume_id)
+                if volume_info['status'] == 'available':
+                    break      
 #            kwargs = {}
 #            kwargs['volume_type'] = volume_type
 #            kwargs['imageRef'] = image_uuid
@@ -709,12 +713,12 @@ class ServersController(wsgi.Controller):
 #            retval = self._view_builder.detail(req, new_volume)
 #            image_uuid = new_volume['id']
         # judge the volume's status info, when is available, then break
-        while True:
-            volume_info = self.volume_api.get(context, volume_id)
-            if volume_info['status'] == 'available':
-#                image_uuid = volume_info['id']
-#                return {"volume_info": volume_info}
-                break                        
+#        while True:
+#            volume_info = self.volume_api.get(context, volume_id)
+#            if volume_info['status'] == 'available':
+##                image_uuid = volume_info['id']
+##                return {"volume_info": volume_info}
+#                break                        
         # NOTE(cyeoh): Although an extension can set
         # return_reservation_id in order to request that a reservation
         # id be returned to the client instead of the newly created
