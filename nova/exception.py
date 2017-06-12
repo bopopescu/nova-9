@@ -1320,6 +1320,8 @@ class ResizeError(NovaException):
 class CannotResizeDisk(NovaException):
     msg_fmt = _("Server disk was unable to be resized because: %(reason)s")
 
+class FlavorCPUTooSmall(NovaException):
+    msg_fmt = _("Flavor's cpu is too small for requested image.")
 
 class FlavorMemoryTooSmall(NovaException):
     msg_fmt = _("Flavor's memory is too small for requested image.")
