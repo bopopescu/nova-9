@@ -28,7 +28,7 @@ from nova.compute import vm_states
 from nova import exception
 from nova.policies import mem_snapshots as ms_policies
 
-from ics_sdk import manager
+#from ics_sdk import manager
 from oslo_log import log as logging
 
 LOG = logging.getLogger(__name__)
@@ -38,9 +38,9 @@ ALIAS = "memsnapshots"
 class MemSnapshotsController(wsgi.Controller):
     def __init__(self, *args, **kwargs):
         super(MemSnapshotsController, self).__init__(*args, **kwargs)
-        user = 'admin'
-        passwd = 'admin@inspur'
-        self.ics_manager = manager.Manager(user, passwd, 'https://100.2.30.85')
+        #user = 'admin'
+        #passwd = 'admin@inspur'
+        #self.ics_manager = manager.Manager(user, passwd, 'https://100.2.30.85')
         self.compute_api = compute.API()
 
     def test(self, req, id):
