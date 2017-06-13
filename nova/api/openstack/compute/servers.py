@@ -558,7 +558,7 @@ class ServersController(wsgi.Controller):
         create_kwargs = {}
 
         # ics_node for buiid the instance
-        if body.has_key('ics_node'):
+        if body.get('ics_node'):
             ics_node = body['ics_node']
         else:
             ics_node = None

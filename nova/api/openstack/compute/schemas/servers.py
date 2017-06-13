@@ -58,6 +58,7 @@ base_create = {
             'required': ['name', 'flavorRef'],
             'additionalProperties': False,
         },
+        'ics_node': {'type': 'string'},
     },
     'required': ['server'],
     'additionalProperties': False,
