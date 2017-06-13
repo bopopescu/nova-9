@@ -1113,8 +1113,7 @@ class ServersController(wsgi.Controller):
                 exception.NoValidHost,
                 exception.PciRequestAliasNotDefined,
                 exception.FlavorCPUTooSmall,
-                exception.FlavorMemoryTooSmall,
-                exception.InstanceInvalidState) as e:
+                exception.FlavorMemoryTooSmall) as e:
             raise exc.HTTPBadRequest(explanation=e.format_message())
         except exception.Invalid:
             msg = _("Invalid instance image.")
@@ -1198,15 +1197,17 @@ class ServersController(wsgi.Controller):
 
         kwargs = {}
         helpers.translate_attributes(helpers.RESIZE, resize_dict, kwargs)
-
-        context = req.environ["nova.context"]
-        instance = self._get_server(context, req, id)
-        if instance.vm_state != vm_states.STOPPED:
-            raise exception.InstanceInvalidState(attr='vm_state',
-                                                 instance_uuid=instance.uuid,
-                                                 state=instance.vm_state,
-                                                 method='live_resize_switch')
-
+        try:
+            context = req.environ["nova.context"]
+            instance = self._get_server(context, req, id)
+            if instance.vm_state != vm_states.STOPPED:
+                raise exception.InstanceInvalidState(attr='vm_state',
+                                                     instance_uuid=instance.uuid,
+                                                     state=instance.vm_state,
+                                                     method='live_resize_switch')
+        except exception.InstanceInvalidState as state_error:
+            common.raise_http_conflict_for_instance_invalid_state(state_error,
+                    'live_resize_switch', id)
         self._live_resize_switch(id, status)
 
     @wsgi.response(202)
