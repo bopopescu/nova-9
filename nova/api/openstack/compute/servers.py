@@ -36,6 +36,7 @@ from nova.api import validation
 from nova import compute
 from nova.compute import flavors
 from nova.compute import utils as compute_utils
+from nova.compute import vm_states
 import nova.conf
 from nova import context as nova_context
 from nova import exception
@@ -1081,6 +1082,11 @@ class ServersController(wsgi.Controller):
                             'project_id': instance.project_id})
 
         try:
+            if instance.vm_state != vm_states.ACTIVE:
+                raise exception.InstanceInvalidState(attr='vm_state',
+                                                     instance_uuid=instance.uuid,
+                                                     state=instance.vm_state,
+                                                     method='live_resize')
             self.compute_api.live_resize(context, instance, flavor_id, **kwargs)
         except exception.InstanceUnknownCell as e:
             raise exc.HTTPNotFound(explanation=e.format_message())
@@ -1107,7 +1113,8 @@ class ServersController(wsgi.Controller):
                 exception.NoValidHost,
                 exception.PciRequestAliasNotDefined,
                 exception.FlavorCPUTooSmall,
-                exception.FlavorMemoryTooSmall) as e:
+                exception.FlavorMemoryTooSmall,
+                exception.InstanceInvalidState) as e:
             raise exc.HTTPBadRequest(explanation=e.format_message())
         except exception.Invalid:
             msg = _("Invalid instance image.")
@@ -1191,6 +1198,14 @@ class ServersController(wsgi.Controller):
 
         kwargs = {}
         helpers.translate_attributes(helpers.RESIZE, resize_dict, kwargs)
+
+        context = req.environ["nova.context"]
+        instance = self._get_server(context, req, id)
+        if instance.vm_state != vm_states.STOPPED:
+            raise exception.InstanceInvalidState(attr='vm_state',
+                                                 instance_uuid=instance.uuid,
+                                                 state=instance.vm_state,
+                                                 method='live_resize_switch')
 
         self._live_resize_switch(id, status)
 
