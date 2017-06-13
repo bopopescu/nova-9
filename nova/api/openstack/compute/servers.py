@@ -558,8 +558,8 @@ class ServersController(wsgi.Controller):
         create_kwargs = {}
 
         # ics_node for buiid the instance
-        if body.has_key('ics_node'):
-            ics_node = body['ics_node']
+        if 'ics_node' in server_dict:
+            ics_node = server_dict['ics_node']
         else:
             ics_node = None
         image_id = server_dict['imageRef']
