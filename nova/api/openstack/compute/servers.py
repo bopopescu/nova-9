@@ -1395,7 +1395,10 @@ class ServersController(wsgi.Controller):
                     target={'user_id': instance.user_id,
                             'project_id': instance.project_id})
         try:
-            self.compute_api.stop(context, instance)
+            shutdown = True
+            if body.get("shutdown") =='soft':
+                shutdown = False
+            self.compute_api.stop(context, instance, clean_shutdown=shutdown)
         except (exception.InstanceNotReady, exception.InstanceIsLocked) as e:
             raise webob.exc.HTTPConflict(explanation=e.format_message())
         except exception.InstanceUnknownCell as e:
