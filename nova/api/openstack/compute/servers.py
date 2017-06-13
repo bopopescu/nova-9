@@ -562,12 +562,18 @@ class ServersController(wsgi.Controller):
             ics_node = body['ics_node']
         else:
             ics_node = None
-        image_id = server_dict['imageRef']
-        image_info = self.image_api.get(context, image_id, False, True)
+        image_info = None
+        image_id = None
+        image_size_transfor = None
+        if server_dict.has_key('volume_type'):
+            image_id = server_dict['imageRef']
+            image_info = self.image_api.get(context, image_id, False, True)
+            image_size_true = image_info['size']
+            image_size_transfor = image_size_true/1024/1024/1024 + 1
 #        return {"imageInfo": image_info}
-        image_size_true = image_info['size']
+#        image_size_true = image_info['size']
         # the 'size' is marked as byte, so change to Gb
-        image_size_transfor = image_size_true/1024/1024/1024 + 1
+#        image_size_transfor = image_size_true/1024/1024/1024 + 1
         volume_id = None
         if server_dict.has_key('volume_type'):
             volume_type = server_dict['volume_type']
