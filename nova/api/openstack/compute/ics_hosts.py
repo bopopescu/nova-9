@@ -99,6 +99,7 @@ class IcsHostsController(wsgi.Controller):
             for k in keys:
                 host[k] = ics_host.get(k)
             host['ip'] = ics_host.get('name')
+            host['totalMem'] = int(round(ics_host.get('totalMem')))
             return dict(host=host, error="")
         except Exception as e:
             return dict(host={}, error=e.message)
