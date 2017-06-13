@@ -1404,7 +1404,7 @@ class ServersController(wsgi.Controller):
                             'project_id': instance.project_id})
         try:
             shutdown = True
-            if body.get("shutdown") =='soft':
+            if body['os-stop'].get("shutdown") =='soft':
                 shutdown = False
             self.compute_api.stop(context, instance, clean_shutdown=shutdown)
         except (exception.InstanceNotReady, exception.InstanceIsLocked) as e:
