@@ -3377,6 +3377,7 @@ class API(base.Base):
             ics_manager = session.get_session()
             ret = ics_manager.vm.get_hotplug_allow(instance.uuid, new_instance_type.vcpus, new_instance_type.memory_mb)
         except Exception as e:
+            LOG.exception(e)
             raise exception.InstanceNotFound(instance_id=instance.uuid)
 
         if not ret:
