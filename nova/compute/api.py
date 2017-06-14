@@ -3371,18 +3371,21 @@ class API(base.Base):
             raise exception.CannotResizeDisk(reason)
 
         # check the flavor is suitable or not.
-        ret = False
-        try:
-            from ics_sdk import session
-            ics_manager = session.get_session()
-            ret = ics_manager.vm.get_hotplug_allow(instance.uuid, new_instance_type.vcpus, new_instance_type.memory_mb)
-        except Exception as e:
-            LOG.exception(e)
-            raise exception.InstanceNotFound(instance_id=instance.uuid)
-
-        if not ret:
-            raise exception.InstanceInvalidFlavor(instance_uuid=new_instance_type.uuid,
-                                                  flavor=flavor_id)
+        # ret = False
+        # try:
+        #     from ics_sdk import session
+        #     ics_manager = session.get_session()
+        #     LOG.debug("get_hotplug_allow uuid=%s" % str(instance.uuid))
+        #     LOG.debug("get_hotplug_allow vcpus=%d" % new_instance_type.vcpus)
+        #     LOG.debug("get_hotplug_allow memory_mb=%d" % new_instance_type.memory_mb)
+        #     ret = ics_manager.vm.get_hotplug_allow(instance.uuid, new_instance_type.vcpus, new_instance_type.memory_mb)
+        # except Exception as e:
+        #     LOG.debug(_LE(e.message))
+        #     raise exception.InstanceNotFound(instance_id=instance.uuid)
+        #
+        # if not ret:
+        #     raise exception.InstanceInvalidFlavor(instance_uuid=new_instance_type.uuid,
+        #                                           flavor=flavor_id)
 
         # ensure there is sufficient headroom for upsizes
         if flavor_id:
