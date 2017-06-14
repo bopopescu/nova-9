@@ -16,7 +16,7 @@
 
 """The ics-vm impl."""
 
-from ics_sdk import session
+# from ics_sdk import session
 
 from nova.policies import ics_vm as ics_vm_pl
 import webob.exc
@@ -53,7 +53,7 @@ class IcsVmController(wsgi.Controller):
         """init work"""
         #  self._ics_manager = session.get_session()
         self._ics_manager = None
-        self._get_ics_session()
+        #  self._get_ics_session()
         self._compute_api = compute.API()
         self._image_api = nova.image.API()
         super(IcsVmController, self).__init__()
@@ -67,6 +67,7 @@ class IcsVmController(wsgi.Controller):
         if self._ics_manager:
             return True
         try:
+            from ics_sdk import session
             self._ics_manager = session.get_session()
             return True
         except:
