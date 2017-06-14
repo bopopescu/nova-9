@@ -3370,6 +3370,17 @@ class API(base.Base):
             reason = _('Resize to smaller disk flavor is not allowed.')
             raise exception.CannotResizeDisk(reason)
 
+        # check the flavor is suitable or not.
+        try:
+            from ics_sdk import session
+            ics_manager = session.get_session()
+            ret = ics_manager.vm.get_hotplug_allow(instance.uuid, new_instance_type.vcpus, new_instance_type.memory_mb)
+            if not ret:
+                raise exception.InstanceInvalidFlavor(instance_uuid=new_instance_type.uuid,
+                                                      flavor=flavor_id)
+        except Exception as e:
+            raise exception.NovaException(e)
+
         # ensure there is sufficient headroom for upsizes
         if flavor_id:
             deltas = compute_utils.upsize_quota_delta(context,

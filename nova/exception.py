@@ -379,6 +379,10 @@ class InstanceInvalidState(Invalid):
                 "%(method)s while the instance is in this state.")
 
 
+class InstanceInvalidFlavor(Invalid):
+    msg_fmt = _("Instance %(instance_uuid)s cannot be set to flavor %(flavor)s")
+
+
 class InstanceNotRunning(Invalid):
     msg_fmt = _("Instance %(instance_id)s is not running.")
 
