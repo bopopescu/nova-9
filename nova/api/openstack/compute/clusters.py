@@ -15,12 +15,13 @@
 
 """The clusters admin extension."""
 
+import json
 from oslo_log import log as logging
 
 from nova.api.openstack import extensions
 from nova.api.openstack import wsgi
 from nova.policies import clusters as cl_policies
-from ics_sdk import session as ics_session
+
 
 LOG = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class ClustersController(wsgi.Controller):
         if self.ics_manager:
             return True
         try:
+            from ics_sdk import session as ics_session
             self.ics_manager = ics_session.get_session()
             return True
         except:
@@ -63,6 +65,7 @@ class ClustersController(wsgi.Controller):
             if id not in self._get_all_cluster_ids():
                 return dict(hosts=[], error='CLUSTER_NOT_EXIST')
             ics_hosts = self.ics_manager.host.get_hosts_in_cluster(id)
+            LOG.info('------Get cluster hosts from ICS------ : ' + json.dumps(ics_hosts))
             hosts = []
             keys = ['id',
                     'clusterId',
