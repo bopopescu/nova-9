@@ -28,9 +28,6 @@ class PanickPolicyController(wsgi.Controller):
     """The panick policy API controller for OpenStack API"""
     
     def __init__(self):
-        from ics_sdk import session
-
-        self.ics_manager = session.get_session()
         super(PanickPolicyController, self).__init__()
 
     @extensions.expected_errors(404)
@@ -40,6 +37,8 @@ class PanickPolicyController(wsgi.Controller):
         #call ics_sdk
         res = {'flag':True, 'errorMessage':None, 'resData':None}
         try:
+            from ics_sdk import session
+            self.ics_manager = session.get_session()
             vm_obj = self.ics_manager.vm.get_info(id)
             vm_obj['panickPolicy'] = body['panickPolicy']
             taskId = self.ics_manager.vm.edit_vm(id, vm_obj)
@@ -57,6 +56,8 @@ class PanickPolicyController(wsgi.Controller):
         # call ics_sdk
         res = {'flag': True, 'errorMessage': None, 'resData': None}
         try:
+            from ics_sdk import session
+            self.ics_manager = session.get_session()
             vm_obj = self.ics_manager.vm.get_info(id)
             res['resData']={'vm_id' : id, 'panickPolicy' : vm_obj['panickPolicy']}
         except Exception as e:
