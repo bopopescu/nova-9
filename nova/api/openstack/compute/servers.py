@@ -1113,7 +1113,8 @@ class ServersController(wsgi.Controller):
                 exception.NoValidHost,
                 exception.PciRequestAliasNotDefined,
                 exception.FlavorCPUTooSmall,
-                exception.FlavorMemoryTooSmall) as e:
+                exception.FlavorMemoryTooSmall,
+                exception.InstanceInvalidFlavor) as e:
             raise exc.HTTPBadRequest(explanation=e.format_message())
         except exception.Invalid:
             msg = _("Invalid instance image.")
