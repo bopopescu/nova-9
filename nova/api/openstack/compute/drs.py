@@ -16,7 +16,6 @@ from oslo_log import log as logging
 from nova.api.openstack import extensions
 from nova.api.openstack import wsgi
 from nova.api.openstack.compute.views import hypervisors as hyper_view
-from ics_sdk import session as ics_session
 from nova.policies import drs as cl_policies
 from nova.api import validation
 from nova.api.openstack.compute.schemas import drs
@@ -32,6 +31,7 @@ class DRSController(wsgi.Controller):
 
     def __init__(self):
         try:
+            from ics_sdk import session as ics_session
             self.ics_manager = ics_session.get_session()
             super(DRSController, self).__init__()
         except Exception, e:
