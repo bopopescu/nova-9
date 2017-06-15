@@ -16,6 +16,7 @@
 """The ics nodes admin extension."""
 
 import json
+import traceback
 from oslo_log import log as logging
 
 from nova.api.openstack import extensions
@@ -91,7 +92,7 @@ class IcsHostsController(wsgi.Controller):
                 return dict(detail={}, error='CANNOT_CONNECT_ICS')
     
             ics_host = self.ics_manager.host.get_host(id)
-            LOG.info('------Get cluster hosts from ICS------ : ' + json.dumps(ics_host))
+            LOG.info('------Get host info from ICS------ : ' + json.dumps(ics_host))
             tmp = ics_host.get('message')
             if tmp:
                 return dict(detail={}, error='HOST_NOT_EXIST')
@@ -112,6 +113,7 @@ class IcsHostsController(wsgi.Controller):
             host['totalMem'] = int(round(ics_host.get('totalMem')))
             return dict(host=host, error="")
         except Exception as e:
+            LOG.error('Error to get host info from ICS : ' + traceback.format_exc())
             return dict(host={}, error=e.message)
 
 

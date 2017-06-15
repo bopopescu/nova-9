@@ -16,6 +16,7 @@
 """The clusters admin extension."""
 
 import json
+import traceback
 from oslo_log import log as logging
 
 from nova.api.openstack import extensions
@@ -86,6 +87,7 @@ class ClustersController(wsgi.Controller):
                 hosts.append(host)
             return dict(hosts=hosts, error='')
         except Exception as e:
+            LOG.error('Error to get cluster hosts from ICS : ' + traceback.format_exc())
             return dict(hosts=[], error=e.message)
 
 
