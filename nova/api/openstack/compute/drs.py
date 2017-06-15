@@ -35,7 +35,7 @@ class DRSController(wsgi.Controller):
             self.ics_manager = ics_session.get_session()
             super(DRSController, self).__init__()
         except Exception, e:
-            return "Error: ICS get_session! %s" %e
+            return None
 
     @extensions.expected_errors((400, 404))
     @validation.schema(drs.setdrs)
