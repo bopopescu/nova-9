@@ -77,7 +77,7 @@ class IcsHostsController(wsgi.Controller):
                 vm = {}
                 for k in keys:
                     vm[k] = ics_vm.get(k)
-                    vms.append(vm)
+                vms.append(vm)
             return dict(vms=vms)
         except Exception as e:
             return dict(vms=[], error=e.message)
