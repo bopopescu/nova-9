@@ -31,7 +31,6 @@ from nova.i18n import _LE
 from nova.policies import migrate_server as ms_policies
 
 import json
-from ics_sdk import session
 
 LOG = logging.getLogger(__name__)
 ALIAS = "os-migrate-server"
@@ -47,6 +46,7 @@ class MigrateServerController(wsgi.Controller):
         if self.ics_manager:
             return True
         try:
+            from ics_sdk import session
             self.ics_manager = session.get_session()
             return True
         except:
