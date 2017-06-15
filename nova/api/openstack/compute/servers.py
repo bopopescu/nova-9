@@ -72,7 +72,7 @@ class ServersController(wsgi.Controller):
     schema_server_resize = schema_servers.base_resize
     schema_server_live_resize = schema_servers.base_live_resize
     schema_server_live_resize_switch = schema_servers.base_live_resize_switch
-
+    schema_server_live_resize_flavor_check = schema_servers.base_live_resize_flavor_check
     schema_server_create_v20 = schema_servers.base_create_v20
     schema_server_update_v20 = schema_servers.base_update_v20
     schema_server_rebuild_v20 = schema_servers.base_rebuild_v20
@@ -1225,6 +1225,33 @@ class ServersController(wsgi.Controller):
         helpers.translate_attributes(helpers.RESIZE, resize_dict, kwargs)
 
         self._live_resize(req, id, flavor_ref, **kwargs)
+
+    def _live_resize_flavor_check(self, req, instance_id, flavor_id, **kwargs):
+        """Begin the resize process with given instance/flavor."""
+        context = req.environ["nova.context"]
+        instance = self._get_server(context, req, instance_id)
+        context.can(server_policies.SERVERS % 'live_resize_flavor_check',
+                    target={'user_id': instance.user_id,
+                            'project_id': instance.project_id})
+        self.compute_api.live_resize_flavor_check(context, instance, flavor_id, **kwargs)
+
+    @wsgi.response(202)
+    @extensions.expected_errors((400, 401, 403, 404, 409))
+    @wsgi.action('live_resize_flavor_check')
+    @validation.schema(schema_server_live_resize_flavor_check)
+    def _action_live_resize_flavor_check(self, req, id, body):
+        """Resizes a given instance to the flavor size requested."""
+        resize_dict = body['live_resize_flavor_check']
+        flavor_ref = str(resize_dict["flavorRef"])
+
+        kwargs = {}
+        helpers.translate_attributes(helpers.RESIZE, resize_dict, kwargs)
+        try:
+            self._live_resize_flavor_check(req, id, flavor_ref, **kwargs)
+            return {"status":True, "exception":''}
+        except Exception as e:
+            LOG.exception(e)
+            return {"status": False, "exception":e.message}
 
     @wsgi.response(202)
     @extensions.expected_errors((400, 403, 404, 409))

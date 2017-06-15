@@ -3310,6 +3310,31 @@ class API(base.Base):
     @check_instance_lock
     @check_instance_cell
     @check_instance_state(vm_state=[vm_states.ACTIVE, vm_states.STOPPED])
+    def live_resize_flavor_check(self, context, instance, flavor_id=None, clean_shutdown=True,
+               **extra_instance_updates):
+        current_instance_type = instance.get_flavor()
+        new_instance_type = flavors.get_flavor_by_flavor_id(
+            flavor_id, read_deleted="no")
+        # check the flavor is suitable or not.
+        ret = False
+        try:
+            from ics_sdk import session
+            ics_manager = session.get_session()
+            LOG.debug("get_hotplug_allow uuid=%s" % str(instance.uuid))
+            LOG.debug("get_hotplug_allow vcpus=%d" % new_instance_type.vcpus)
+            LOG.debug("get_hotplug_allow memory_mb=%d" % new_instance_type.memory_mb)
+            ret = ics_manager.vm.get_hotplug_allow(instance.uuid, new_instance_type.vcpus, new_instance_type.memory_mb)
+        except Exception as e:
+            LOG.debug(_LE(e.message))
+            raise exception.InstanceNotFound(instance_id=instance.uuid)
+
+        if not ret:
+            raise exception.InstanceInvalidFlavor(instance_uuid=instance.uuid,
+                                                  flavor=flavor_id)
+
+    @check_instance_lock
+    @check_instance_cell
+    @check_instance_state(vm_state=[vm_states.ACTIVE, vm_states.STOPPED])
     def live_resize(self, context, instance, flavor_id=None, clean_shutdown=True,
                **extra_instance_updates):
         """Live resize a running instance.

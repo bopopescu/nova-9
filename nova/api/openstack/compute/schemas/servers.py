@@ -225,6 +225,23 @@ base_live_resize = {
     'additionalProperties': False,
 }
 
+base_live_resize_flavor_check = {
+    'type': 'object',
+    'properties': {
+        'live_resize_flavor_check': {
+            'type': 'object',
+            'properties': {
+                'flavorRef': parameter_types.flavor_ref,
+                'OS-DCF:diskConfig': parameter_types.disk_config,
+            },
+            'required': ['flavorRef'],
+            'additionalProperties': False,
+        },
+    },
+    'required': ['live_resize_flavor_check'],
+    'additionalProperties': False,
+}
+
 base_live_resize_switch = {
     'type': 'object',
     'properties': {
