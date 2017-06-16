@@ -97,7 +97,7 @@ class MigrateServerController(wsgi.Controller):
         try:
             # make sure the target host is exist or not
             hostInfo = self.ics_manager.host.get_host(nodeTarget)
-            if hostInfo['code'] == int('20027'):
+            if hostInfo.get('code'):
                 return {'success': False, "vmId": id, "hostId": nodeTarget, "result": hostInfo['message']}
             # do the migration
             result = self.ics_manager.vm.live_migrate(id, nodeTarget)
