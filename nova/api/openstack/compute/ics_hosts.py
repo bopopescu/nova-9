@@ -105,7 +105,8 @@ class IcsHostsController(wsgi.Controller):
                     'totalMem',
                     'memoryUsage',
                     'pnicNum',
-                    'status']
+                    'status',
+                    'normalRunTime']
             host = {}
             for k in keys:
                 host[k] = ics_host.get(k)
@@ -116,6 +117,20 @@ class IcsHostsController(wsgi.Controller):
             LOG.error('Error to get host info from ICS : ' + traceback.format_exc())
             return dict(host={}, error=e.message)
 
+    def unusedusbs(self, req, id):
+        context = req.environ['nova.context']
+        context.can(h_policies.BASE_POLICY_NAME)
+        LOG.debug('Receive ICM request to get unused USBs of host %s.' % id)
+        if not self._get_ics_session():
+            return dict(unusedusbs=[], error='CANNOT_CONNECT_ICS')
+        try:
+            unusedusbs = self.ics_manager.host.get_freeusb_in_host(id)
+            LOG.debug('Receive ICS response to get unused USBs of host %s: %s.'
+                      % (id, json.dumps(unusedusbs)))
+            return dict(unusedusbs=unusedusbs, error="")
+        except Exception as e:
+            return dict(unusedusbs=[], error=e.message)
+
 
 class IcsHosts(extensions.V21APIExtensionBase):
     """Admin-only node administration."""
@@ -125,7 +140,8 @@ class IcsHosts(extensions.V21APIExtensionBase):
     version = 1
 
     def get_resources(self):
-        m_actions = {'vms': 'GET'}
+        m_actions = {'vms': 'GET',
+                     'unusedusbs': 'GET'}
         resources = [extensions.ResourceExtension(ALIAS, IcsHostsController(),
                                                   member_actions=m_actions)]
 

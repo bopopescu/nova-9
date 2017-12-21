@@ -77,7 +77,8 @@ class ClustersController(wsgi.Controller):
                     'totalMem',
                     'memoryUsage',
                     'pnicNum',
-                    'status']
+                    'status',
+                    'normalRunTime']
             for ics_host in ics_hosts:
                 host = {}
                 for k in keys:
@@ -90,6 +91,16 @@ class ClustersController(wsgi.Controller):
             LOG.error('Error to get cluster hosts from ICS : ' + traceback.format_exc())
             return dict(hosts=[], error=e.message)
 
+    @extensions.expected_errors(404)
+    def configs_hainfo(self,req,id):
+        print id
+        return self.ics_manager.cluster.get_cluster_hainfo(id)
+        
+    def configs_ha(self,req,id,body):
+        if_on = body.get('switch')
+        print id
+        print if_on
+        return self.ics_manager.cluster.set_cluster_ha(id, if_on, 3)
 
 class Clusters(extensions.V21APIExtensionBase):
     """Admin-only cluster administration."""
@@ -99,7 +110,7 @@ class Clusters(extensions.V21APIExtensionBase):
     version = 1
 
     def get_resources(self):
-        m_actions = {'hosts': 'GET'}
+        m_actions = {'hosts': 'GET',"configs_hainfo": "GET","configs_ha": "POST"}
         resources = [extensions.ResourceExtension(ALIAS, ClustersController(),
                                                   member_actions=m_actions)]
 

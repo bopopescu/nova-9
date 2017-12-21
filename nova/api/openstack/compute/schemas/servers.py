@@ -59,6 +59,16 @@ base_create = {
             'additionalProperties': False,
         },
         'ics_node': {'type': 'string'},
+        'cpuSocket': {'type': ['string', 'integer'], 'minLength': 1},
+        "cpuCore": {'type': ['string', 'integer'], 'minLength': 1},
+        "vcpuPin": {'type':'array',
+                    'items':{
+                        'type': ['string', 'integer'],
+                        'additionalProperties': False,
+                        }
+                    },
+        "sshkey": {'type': 'string'},
+        "guestosLabel": {'type': 'string'},
     },
     'required': ['server'],
     'additionalProperties': False,

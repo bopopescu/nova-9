@@ -86,9 +86,17 @@ class MigrateServerController(wsgi.Controller):
          
         if not id:
             return dict(vms=[], error='VM_ID_NULL')
-        
-        context = req.environ['nova.context']
+        try:            
+            vm_info = self.ics_manager.vm.get_info(id)
+        except exception as e:
+            return {"success":False, "message":"Vm is not found and get vm_info has errors"}
         nodeTarget = body["migrateExtend"]["nodeTarget"]
+        if vm_info:
+            if vm_info['migratable'] == False:
+                return {'success': False, 'code': '300089', "message": 'The vm is not allowed to migrate'}
+            if vm_info['hostId'] == nodeTarget:
+                return {'success': False, 'code': '300090', "message": 'The hostId which vm belongs is same as the target_hostId, Please check'}
+        context = req.environ['nova.context']
         
 #        if not hostInfo or hostInfo['id']:
 #            return {'success': False, "vmId": id, "hostId": nodeTarget, "result": "HOST IS NULL"}        

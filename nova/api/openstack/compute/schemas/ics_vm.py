@@ -34,3 +34,13 @@ unmount = {
     'additionalProperties': False
 }
 
+attach_usb = {
+    'type': 'object',
+    'properties': {
+        'bus': parameter_types.name,
+        'device': parameter_types.name,
+        'releaseAfterPowerOff': parameter_types.boolean
+    },
+    'required': ['bus', 'device', 'releaseAfterPowerOff'],
+    'additionalProperties': False
+}

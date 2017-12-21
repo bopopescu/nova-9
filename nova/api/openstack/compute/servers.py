@@ -157,6 +157,7 @@ class ServersController(wsgi.Controller):
         self.compute_api = compute.API()
         self.volume_api = cinder.API()
         self.image_api = api.API()
+        self.ics_manager = None
 
         # Look for implementation of extension point of server creation
         self.create_extension_manager = \
@@ -197,6 +198,17 @@ class ServersController(wsgi.Controller):
                                            '2.0')
         else:
             LOG.debug("Did not find any server create schemas")
+    
+    def _get_ics_session(self):
+        if self.ics_manager:
+            return True
+        try:
+            from ics_sdk import session
+            self.ics_manager = session.get_session()
+            return True
+        except:
+            self.ics_manager = None
+            return False
 
     @extensions.expected_errors((400, 403))
     @validation.query_schema(schema_servers.query_params_v226, '2.26')
@@ -557,32 +569,43 @@ class ServersController(wsgi.Controller):
 
         # Arguments to be passed to instance create function
         create_kwargs = {}
-
-        # ics_node for buiid the instance
-        if body.get('ics_node'):
-            ics_node = body['ics_node']
-        else:
-            ics_node = None
         image_info = None
         image_id = None
         image_size_transfor = None
         if server_dict.has_key('volume_type'):
+            if not self._get_ics_session():
+                return {"success":False, "message":"CANNOT_CONNECT_ICS"}
             image_id = server_dict['imageRef']
             image_info = self.image_api.get(context, image_id, False, True)
             image_size_true = image_info['size']
-            image_size_transfor = image_size_true/1024/1024/1024 + 1
+            image_volume = self.ics_manager.volume.get_volume_info_by_id(image_id)
+            if image_volume:
+                if 'code' in image_volume:
+                    return {"success":False, "message":"Get volume booting from image has errors"}
+            else:
+                return {"success":False, "message":"Get volume booting from image has errors"}
+            image_size_transfor = int(image_volume['size'])
+#             image_size_transfor = image_size_true/1024/1024/1024 + 1
 #        return {"imageInfo": image_info}
 #        image_size_true = image_info['size']
         # the 'size' is marked as byte, so change to Gb
 #        image_size_transfor = image_size_true/1024/1024/1024 + 1
         volume_id = None
         if server_dict.has_key('volume_type'):
+            inst_type = flavors.get_flavor_by_flavor_id(
+                    server_dict['flavorRef'], ctxt=context, read_deleted="no")
+            flavor_disk = inst_type['root_gb']
+            # choose the volume_size
+            if flavor_disk >=  image_size_transfor:
+                volume_size_true = flavor_disk
+            else:
+                return {"success":False, 'code': '300087', "message":"The flavor disk size is too small to create the boot_volume"}
             volume_type = server_dict['volume_type']
             detail = {}
             detail['boot_index'] = '0'
 #            detail['uuid'] = '5aa587bd-2b70-4b7c-af51-c895b83d2e1f'
             detail['source_type'] = 'volume'
-            detail['volume_size'] = image_size_transfor
+            detail['volume_size'] = volume_size_true
             detail['destination_type'] = 'volume'
             detail['delete_on_termination'] = True
             size = 1
@@ -591,7 +614,7 @@ class ServersController(wsgi.Controller):
 #            "block_device_mapping_v2":[{"boot_index":"0","uuid":"92d24d7e-a634-402b-9717-88d694a9dff9","source_type":"volume",
 #                                        "volume_size":"1","destination_type":"volume","delete_on_termination":true}],
 #            new_volume = self.volume_api.create(context, size, name, description, **kwargs)
-            new_volume = self.volume_api.create(context, image_size_transfor, volume_name, volume_description, None, image_id,
+            new_volume = self.volume_api.create(context, volume_size_true, volume_name, volume_description, None, image_id,
                                                 volume_type, None, server_dict['availability_zone'])
 #            create(self, context, size, name, description, snapshot=None,
 #               image_id=None, volume_type=None, metadata=None,
@@ -762,7 +785,7 @@ class ServersController(wsgi.Controller):
                             availability_zone=availability_zone,
                             forced_host=host, forced_node=node,
                             metadata=server_dict.get('metadata', {}),
-                            admin_password=password, ics_node=ics_node,
+                            admin_password=password,
                             requested_networks=requested_networks,
                             check_server_group_quota=True,
                             **create_kwargs)
@@ -859,6 +882,324 @@ class ServersController(wsgi.Controller):
 
         return self._add_location(robj)
 
+    @wsgi.response(202)
+    @extensions.expected_errors((400, 403, 409))
+    @validation.schema(schema_server_create_v20, '2.0', '2.0')
+    @validation.schema(schema_server_create, '2.1', '2.18')
+    @validation.schema(schema_server_create_v219, '2.19', '2.31')
+    @validation.schema(schema_server_create_v232, '2.32', '2.36')
+    @validation.schema(schema_server_create_v237, '2.37', '2.41')
+    @validation.schema(schema_server_create_v242, '2.42')
+    def createIcsVm(self, req, body):
+        """Creates a new server for a given user."""
+
+        context = req.environ['nova.context']
+        server_dict = body['server']
+
+        password = self._get_server_admin_password(server_dict)
+        name = common.normalize_name(server_dict['name'])
+
+        if api_version_request.is_supported(req, min_version='2.19'):
+            if 'description' in server_dict:
+                # This is allowed to be None
+                description = server_dict['description']
+            else:
+                # No default description
+                description = None
+        else:
+            description = name
+
+        # Arguments to be passed to instance create function
+        create_kwargs = {}
+
+        # ics_node for buiid the instance
+        if body.get('ics_node'):
+            ics_node = body['ics_node']
+            if body.get('vcpuPin'):
+                vcpuPin = body['vcpuPin']
+            else:
+                vcpuPin = None
+        else:
+            if body.get('vcpuPin'):
+                msg = _("Invalid provided, ics_node must be provided with vcpuPin.")
+                raise exc.HTTPBadRequest(explanation=msg)
+            ics_node = None
+            vcpuPin = None
+        if body.get('cpuSocket') and body.get('cpuCore'):
+            cpuSocket = body['cpuSocket']
+            cpuCore = body['cpuCore']
+            inst_type = flavors.get_flavor_by_flavor_id(
+                server_dict['flavorRef'], ctxt=context, read_deleted="no")
+            flavor_vcpus = inst_type['vcpus']
+            if cpuSocket * cpuCore != flavor_vcpus:
+                msg = _("Invalid provided, cpuSocket multiplied cpuCore must be equal to flavor_vcpus.")
+                raise exc.HTTPBadRequest(explanation=msg)
+        else:
+            if body.get('cpuSocket') or body.get('cpuCore'):
+                msg = _("Invalid provided, cpuSocket and cpuCore must be provided together.")
+                raise exc.HTTPBadRequest(explanation=msg)
+            cpuSocket = None
+            cpuCore = None
+        if body.get('guestosLabel'):
+            guestosLabel = body['guestosLabel']
+        else:
+            guestosLabel = None
+        if body.get('sshkey'):
+            sshkey = body['sshkey']
+        else:
+            sshkey = None
+        image_info = None
+        image_id = None
+        image_size_transfor = None
+        if server_dict.has_key('volume_type'):
+            if not self._get_ics_session():
+                return {"success": False, "message": "CANNOT_CONNECT_ICS"}
+            image_id = server_dict['imageRef']
+            image_info = self.image_api.get(context, image_id, False, True)
+            image_size_true = image_info['size']
+            image_volume = self.ics_manager.volume.get_volume_info_by_id(image_id)
+            if image_volume:
+                if 'code' in image_volume:
+                    return {"success": False, "message": "Get volume booting from image has errors"}
+            else:
+                return {"success": False, "message": "Get volume booting from image has errors"}
+            image_size_transfor = int(image_volume['size'])
+
+        volume_id = None
+        if server_dict.has_key('volume_type'):
+            inst_type = flavors.get_flavor_by_flavor_id(
+                    server_dict['flavorRef'], ctxt=context, read_deleted="no")
+            flavor_disk = inst_type['root_gb']
+            # choose the volume_size
+            if flavor_disk >=  image_size_transfor:
+                volume_size_true = flavor_disk
+            else:
+                return {"success":False, 'code': '300087', "message":"The flavor disk size is too small to create the boot_volume"}
+            volume_type = server_dict['volume_type']
+            detail = {}
+            detail['boot_index'] = '0'
+            #            detail['uuid'] = '5aa587bd-2b70-4b7c-af51-c895b83d2e1f'
+            detail['source_type'] = 'volume'
+            detail['volume_size'] = volume_size_true
+            detail['destination_type'] = 'volume'
+            detail['delete_on_termination'] = True
+            size = 1
+            volume_name = 'for_vm_' + server_dict['name']
+            volume_description = 'for create vm'
+            #            "block_device_mapping_v2":[{"boot_index":"0","uuid":"92d24d7e-a634-402b-9717-88d694a9dff9","source_type":"volume",
+            #                                        "volume_size":"1","destination_type":"volume","delete_on_termination":true}],
+            #            new_volume = self.volume_api.create(context, size, name, description, **kwargs)
+            new_volume = self.volume_api.create(context, volume_size_true, volume_name, volume_description, None, image_id,
+                                                volume_type, None, server_dict['availability_zone'])
+            #            create(self, context, size, name, description, snapshot=None,
+            #               image_id=None, volume_type=None, metadata=None,
+            #               availability_zone=None)
+            volume_id = new_volume['id']
+            detail['uuid'] = new_volume['id']
+            server_dict["block_device_mapping_v2"] = [detail]
+            #            body['server'] = server_dict
+        else:
+            volume_type = None
+        # Query extensions which want to manipulate the keyword
+        # arguments.
+        # NOTE(cyeoh): This is the hook that extensions use
+        # to replace the extension specific code below.
+        # When the extensions are ported this will also result
+        # in some convenience function from this class being
+        # moved to the extension
+        if list(self.create_extension_manager):
+            self.create_extension_manager.map(self._create_extension_point,
+                                              server_dict, create_kwargs, body)
+
+        availability_zone = create_kwargs.pop("availability_zone", None)
+
+        helpers.translate_attributes(helpers.CREATE,
+                                     server_dict, create_kwargs)
+
+        target = {
+            'project_id': context.project_id,
+            'user_id': context.user_id,
+            'availability_zone': availability_zone}
+        context.can(server_policies.SERVERS % 'create', target)
+
+        # TODO(Shao He, Feng) move this policy check to os-availability-zone
+        # extension after refactor it.
+        parse_az = self.compute_api.parse_availability_zone
+        try:
+            availability_zone, host, node = parse_az(context,
+                                                     availability_zone)
+        except exception.InvalidInput as err:
+            raise exc.HTTPBadRequest(explanation=six.text_type(err))
+        if host or node:
+            context.can(server_policies.SERVERS % 'create:forced_host', {})
+
+        min_compute_version = objects.Service.get_minimum_version(
+            nova_context.get_admin_context(), 'nova-compute')
+        supports_device_tagging = (min_compute_version >=
+                                   DEVICE_TAGGING_MIN_COMPUTE_VERSION)
+
+        block_device_mapping = create_kwargs.get("block_device_mapping")
+        # TODO(Shao He, Feng) move this policy check to os-block-device-mapping
+        # extension after refactor it.
+        if block_device_mapping:
+            context.can(server_policies.SERVERS % 'create:attach_volume',
+                        target)
+            for bdm in block_device_mapping:
+                if bdm.get('tag', None) and not supports_device_tagging:
+                    msg = _('Block device tags are not yet supported.')
+                    raise exc.HTTPBadRequest(explanation=msg)
+
+        image_uuid = self._image_from_req_data(server_dict, create_kwargs)
+
+        # add image create info, the import thing is change the image_uuid
+        if server_dict.has_key('volume_type'):
+            volume_type = server_dict['volume_type']
+        else:
+            volume_type = None
+            #        volume_id = None;
+        if volume_type:
+            #            return {'hello': create_kwargs}
+            # create a image use the 'imageRef' and 'storage_type'
+            LOG.debug('volume_type---------------: %s', volume_type)
+            while True:
+                volume_info = self.volume_api.get(context, volume_id)
+                if volume_info['status'] == 'available':
+                    break
+        # NOTE(cyeoh): Although an extension can set
+        # return_reservation_id in order to request that a reservation
+        # id be returned to the client instead of the newly created
+        # instance information we do not want to pass this parameter
+        # to the compute create call which always returns both. We use
+        # this flag after the instance create call to determine what
+        # to return to the client
+        return_reservation_id = create_kwargs.pop('return_reservation_id',
+                                                  False)
+
+        requested_networks = None
+        if ('os-networks' in self.extension_info.get_extensions()
+            or utils.is_neutron()):
+            requested_networks = server_dict.get('networks')
+
+        if requested_networks is not None:
+            requested_networks = self._get_requested_networks(
+                requested_networks, supports_device_tagging)
+
+        if requested_networks and len(requested_networks):
+            context.can(server_policies.SERVERS % 'create:attach_network',
+                        target)
+
+        flavor_id = self._flavor_id_from_req_data(body)
+        try:
+            inst_type = flavors.get_flavor_by_flavor_id(
+                flavor_id, ctxt=context, read_deleted="no")
+
+            (instances, resv_id) = self.compute_api.createIcsVm(context,
+                                                                inst_type,
+                                                                image_uuid,
+                                                                display_name=name,
+                                                                display_description=description,
+                                                                availability_zone=availability_zone,
+                                                                forced_host=host, forced_node=node,
+                                                                metadata=server_dict.get('metadata', {}),
+                                                                admin_password=password, ics_node=ics_node,
+                                                                cpuSocket=cpuSocket, cpuCore=cpuCore,
+                                                                vcpuPin=vcpuPin, sshkey=sshkey,
+                                                                guestosLabel=guestosLabel,
+                                                                requested_networks=requested_networks,
+                                                                check_server_group_quota=True,
+                                                                **create_kwargs)
+        except (exception.QuotaError,
+                exception.PortLimitExceeded) as error:
+            raise exc.HTTPForbidden(
+                explanation=error.format_message())
+        except exception.ImageNotFound:
+            msg = _("Can not find requested image")
+            raise exc.HTTPBadRequest(explanation=msg)
+        except exception.KeypairNotFound:
+            msg = _("Invalid key_name provided.")
+            raise exc.HTTPBadRequest(explanation=msg)
+        except exception.ConfigDriveInvalidValue:
+            msg = _("Invalid config_drive provided.")
+            raise exc.HTTPBadRequest(explanation=msg)
+        except exception.ExternalNetworkAttachForbidden as error:
+            raise exc.HTTPForbidden(explanation=error.format_message())
+        except messaging.RemoteError as err:
+            msg = "%(err_type)s: %(err_msg)s" % {'err_type': err.exc_type,
+                                                 'err_msg': err.value}
+            raise exc.HTTPBadRequest(explanation=msg)
+        except UnicodeDecodeError as error:
+            msg = "UnicodeError: %s" % error
+            raise exc.HTTPBadRequest(explanation=msg)
+        except (exception.CPUThreadPolicyConfigurationInvalid,
+                exception.ImageNotActive,
+                exception.ImageBadRequest,
+                exception.ImageNotAuthorized,
+                exception.FixedIpNotFoundForAddress,
+                exception.FlavorNotFound,
+                exception.FlavorDiskTooSmall,
+                exception.FlavorMemoryTooSmall,
+                exception.InvalidMetadata,
+                exception.InvalidRequest,
+                exception.InvalidVolume,
+                exception.MultiplePortsNotApplicable,
+                exception.InvalidFixedIpAndMaxCountRequest,
+                exception.InstanceUserDataMalformed,
+                exception.InstanceUserDataTooLarge,
+                exception.PortNotFound,
+                exception.FixedIpAlreadyInUse,
+                exception.SecurityGroupNotFound,
+                exception.PortRequiresFixedIP,
+                exception.NetworkRequiresSubnet,
+                exception.NetworkNotFound,
+                exception.InvalidBDM,
+                exception.InvalidBDMSnapshot,
+                exception.InvalidBDMVolume,
+                exception.InvalidBDMImage,
+                exception.InvalidBDMBootSequence,
+                exception.InvalidBDMLocalsLimit,
+                exception.InvalidBDMVolumeNotBootable,
+                exception.InvalidBDMEphemeralSize,
+                exception.InvalidBDMFormat,
+                exception.InvalidBDMSwapSize,
+                exception.AutoDiskConfigDisabledByImage,
+                exception.ImageCPUPinningForbidden,
+                exception.ImageCPUThreadPolicyForbidden,
+                exception.ImageNUMATopologyIncomplete,
+                exception.ImageNUMATopologyForbidden,
+                exception.ImageNUMATopologyAsymmetric,
+                exception.ImageNUMATopologyCPUOutOfRange,
+                exception.ImageNUMATopologyCPUDuplicates,
+                exception.ImageNUMATopologyCPUsUnassigned,
+                exception.ImageNUMATopologyMemoryOutOfRange,
+                exception.InvalidNUMANodesNumber,
+                exception.InstanceGroupNotFound,
+                exception.MemoryPageSizeInvalid,
+                exception.MemoryPageSizeForbidden,
+                exception.PciRequestAliasNotDefined,
+                exception.RealtimeConfigurationInvalid,
+                exception.RealtimeMaskNotFoundOrInvalid,
+                exception.SnapshotNotFound,
+                exception.UnableToAutoAllocateNetwork) as error:
+            raise exc.HTTPBadRequest(explanation=error.format_message())
+        except (exception.PortInUse,
+                exception.InstanceExists,
+                exception.NetworkAmbiguous,
+                exception.NoUniqueMatch) as error:
+            raise exc.HTTPConflict(explanation=error.format_message())
+
+        # If the caller wanted a reservation_id, return it
+        if return_reservation_id:
+            return wsgi.ResponseObject({'reservation_id': resv_id})
+
+        req.cache_db_instances(instances)
+        server = self._view_builder.create(req, instances[0])
+
+        if CONF.api.enable_instance_password:
+            server['server']['adminPass'] = password
+
+        robj = wsgi.ResponseObject(server)
+
+        return self._add_location(robj)
     # NOTE(gmann): Parameter 'req_body' is placed to handle scheduler_hint
     # extension for V2.1. No other extension supposed to use this as
     # it will be removed soon.
@@ -1398,7 +1739,8 @@ class ServersController(wsgi.Controller):
         if 'adminPass' in server:
             password = server['adminPass']
         else:
-            password = utils.generate_password()
+            #password = utils.generate_password()
+            password = None
         return password
 
     def _get_server_search_options(self, req):
@@ -1532,7 +1874,7 @@ class Servers(extensions.V21APIExtensionBase):
 
     def get_resources(self):
         member_actions = {'action': 'POST'}
-        collection_actions = {'detail': 'GET'}
+        collection_actions = {'detail': 'GET', 'createIcsVm': 'POST'}
         resources = [
             extensions.ResourceExtension(
                 ALIAS,

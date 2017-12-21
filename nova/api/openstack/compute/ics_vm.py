@@ -18,6 +18,8 @@
 
 # from ics_sdk import session
 
+import time
+import json
 from nova.policies import ics_vm as ics_vm_pl
 import webob.exc
 from nova.api.openstack import extensions
@@ -151,6 +153,148 @@ class IcsVmController(wsgi.Controller):
                                        vmid, expected_attrs=None)
         return instance
 
+    @extensions.expected_errors((404, 500))
+    def get_boot_volume_id(self, req, id):
+        try:
+            context = req.environ['nova.context']
+            context.can(ics_vm_pl.BASE_POLICY_NAME)
+            if not self._get_ics_session():
+                return dict(boot_volume_id='', error='CANNOT_CONNECT_ICS')
+            boot_volume_id = ''
+            vm_info = self._ics_manager.vm.get_info(id)
+            for disk in vm_info['disks']:
+                if disk['volume']['bootable']:
+                    boot_volume_id = disk['volume']['id']
+            return dict(boot_volume_id=boot_volume_id, error='')
+        except Exception as e:
+            return dict(boot_volume_id='', error=e.message)
+
+
+    @extensions.expected_errors(500)
+    def icsHostProcessor(self, req, id):
+        """query logicalProcessor of ics_host """
+        context = req.environ['nova.context']
+        context.can(ics_vm_pl.BASE_POLICY_NAME)
+        if not self._get_ics_session():
+            raise webob.exc.HTTPServerError(explanation="ics connect failed !")
+        try:
+            hostInfo = self._ics_manager.host.get_host(id)
+        except Exception as e:
+            # do something
+            LOG.error("query logicalProcessor of ics_host  exception : " + e.message)
+            raise webob.exc.HTTPServerError(explanation=e.message)
+        if 'logicalProcessor' in hostInfo :
+            return dict(logicalProcessor=hostInfo['logicalProcessor'])
+	elif 'message' in hostInfo :
+            raise webob.exc.HTTPServerError(explanation=hostInfo['message'])
+        else :
+            raise webob.exc.HTTPServerError(explanation="there is no logicalProcessor in ics_host: "+id)
+     
+    @extensions.expected_errors(500)
+    def icsGuestOs(self, req):
+        """query ics_vm os all of it """
+        context = req.environ['nova.context']
+        context.can(ics_vm_pl.BASE_POLICY_NAME)
+        if not self._get_ics_session():
+           raise webob.exc.HTTPServerError(explanation="ics connect failed !")
+        try:
+           res = self._ics_manager.vm.get_guestos()
+        except Exception as e:
+           # do something
+           LOG.error("query logicalProcessor of ics_host  exception : " + e.message)
+           raise webob.exc.HTTPServerError(explanation=e.message)
+        return dict(guestsOs=res)
+
+    @validation.schema(ics_vm.attach_usb)
+    def attach_usb(self, req, id, body):
+        context = req.environ['nova.context']
+        context.can(ics_vm_pl.BASE_POLICY_NAME)
+        vm_id = id
+        LOG.debug('Receive ICM request to attach USB to VM "%s", '
+                  'parameter is "%s".' % (vm_id, json.dumps(body)))
+        # connect ICS
+        if not self._get_ics_session():
+            return dict(result='fail', error='CANNOT_CONNECT_ICS')
+        # begin to attach
+        bus = body.get('bus')
+        device = body.get('device')
+        releaseAfterPowerOff = body.get('releaseAfterPowerOff')
+        try:
+            task = self._ics_manager.vm.attach_usb(vm_id,
+                                                   bus,
+                                                   device,
+                                                   releaseAfterPowerOff)
+        except Exception as e:
+            LOG.error('Error to attach USB to VM "%s", USB data is "%s", '
+                      'error message is "%s".'
+                      % (vm_id, json.dumps(body), e.message))
+            return dict(result='fail', error=e.message)
+        # check result
+        if self._attach_usb_result(vm_id, bus, device):
+            return dict(result='success',
+                        error='')
+        else:
+            return dict(result='fail',
+                        error='Error to attach USB to VM %s' % vm_id)
+
+    def detach_usb(self, req, id, body):
+        context = req.environ['nova.context']
+        context.can(ics_vm_pl.BASE_POLICY_NAME)
+        vm_id = id
+        LOG.debug('Receive ICM request to detach USB from VM "%s".' % vm_id)
+        # connect ICS
+        if not self._get_ics_session():
+            return dict(result='fail', error='CANNOT_CONNECT_ICS')
+        # begin to detach
+        try:
+            task = self._ics_manager.vm.detach_usb(vm_id)
+        except Exception as e:
+            LOG.error('Error to detach USB from VM "%s", '
+                      'error message is "%s".'
+                      % (vm_id, e.message))
+            return dict(result='fail', error=e.message)
+        # check result
+        if self._detach_usb_result(vm_id):
+            return dict(result='success',
+                        error='')
+        else:
+            return dict(result='fail',
+                        error='Error to detach USB from VM %s' % vm_id)
+
+    def _attach_usb_result(self, vm_id, bus, device):
+        retry = 0
+        while retry <= 10:
+            retry = retry + 1
+            time.sleep(1)
+            usb_info = self._get_usb_info(vm_id)
+            if usb_info == 'ERROR':
+                continue
+            if usb_info.get('bus') == bus and \
+                    usb_info.get('device') == device:
+                return True
+        return False
+
+    def _detach_usb_result(self, vm_id):
+        retry = 0
+        while retry <= 10:
+            retry = retry + 1
+            time.sleep(1)
+            usb_info = self._get_usb_info(vm_id)
+            if usb_info == 'ERROR':
+                continue
+            if not usb_info:
+                return True
+        return False
+
+    def _get_usb_info(self, vm_id):
+        try:
+            vm_info = self._ics_manager.vm.get_info(vm_id)
+            return vm_info.get('usb')
+        except Exception as e:
+            LOG.error('Error to get VM USB info from ICS, VM ID is "%s", '
+                      'error message is "%s".' % (vm_id, e.message))
+            return 'ERROR'
+
 
 class IcsVm(extensions.V21APIExtensionBase):
     """IcsVm object.
@@ -164,10 +308,16 @@ class IcsVm(extensions.V21APIExtensionBase):
         coll_actions = {
             'mount': 'POST',
             'unmount': 'POST',
+            'icsGuestOs': 'GET'
         }
+        m_actions = {'get_boot_volume_id': 'GET',
+                     'icsHostProcessor': 'GET',
+                     'attach_usb': 'POST',
+                     'detach_usb': 'POST'}
 
         res = extensions.ResourceExtension(ALIAS, IcsVmController(),
-                                           collection_actions=coll_actions)
+                                           collection_actions=coll_actions,
+                                           member_actions=m_actions)
         return [res]
 
     def get_controller_extensions(self):

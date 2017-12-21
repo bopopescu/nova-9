@@ -16,7 +16,7 @@ import itertools
 from nova.policies import admin_actions
 from nova.policies import admin_password
 from nova.policies import agents
-from nova.policies import aggregates	
+from nova.policies import aggregates
 from nova.policies import assisted_volume_snapshots
 from nova.policies import attach_interfaces
 from nova.policies import availability_zone
@@ -28,15 +28,12 @@ from nova.policies import cells
 from nova.policies import cells_scheduler
 from nova.policies import certificates
 from nova.policies import cloudpipe
-from nova.policies import clusters
 from nova.policies import config_drive
 from nova.policies import console_auth_tokens
 from nova.policies import console_output
 from nova.policies import consoles
 from nova.policies import create_backup
-from nova.policies import mem_snapshots
 from nova.policies import deferred_delete
-from nova.policies import drs
 from nova.policies import evacuate
 from nova.policies import extended_availability_zone
 from nova.policies import extended_server_attributes
@@ -73,7 +70,6 @@ from nova.policies import multinic
 from nova.policies import multiple_create
 from nova.policies import networks
 from nova.policies import networks_associate
-from nova.policies import panick_policy
 from nova.policies import pause_server
 from nova.policies import pci
 from nova.policies import quota_class_sets
@@ -105,13 +101,23 @@ from nova.policies import volumes
 from nova.policies import volumes_attachments
 from nova.policies import wstvms
 from nova.policies import wsthost
-from nova.policies import ics_vm
+from nova.policies import cpu_priority
+from nova.policies import mem_priority
 from nova.policies import ics_hosts
+from nova.policies import clusters 
+from nova.policies import drs
+from nova.policies import cpu_qos
+from nova.policies import disk_qos
+from nova.policies import hostnic
+from nova.policies import ics_datastore
+from nova.policies import panick_policy
+from nova.policies import ics_vm
+from nova.policies import monitorstatus
+from nova.policies import mem_snapshots
+
 
 def list_rules():
     return itertools.chain(
-        wstvms.list_rules(),
-        wsthost.list_rules(),
         admin_actions.list_rules(),
         admin_password.list_rules(),
         agents.list_rules(),
@@ -127,15 +133,12 @@ def list_rules():
         cells_scheduler.list_rules(),
         certificates.list_rules(),
         cloudpipe.list_rules(),
-        clusters.list_rules(),
         config_drive.list_rules(),
         console_auth_tokens.list_rules(),
         console_output.list_rules(),
         consoles.list_rules(),
         create_backup.list_rules(),
-        mem_snapshots.list_rules(),
         deferred_delete.list_rules(),
-        drs.list_rules(),
         evacuate.list_rules(),
         extended_availability_zone.list_rules(),
         extended_server_attributes.list_rules(),
@@ -172,7 +175,6 @@ def list_rules():
         multiple_create.list_rules(),
         networks.list_rules(),
         networks_associate.list_rules(),
-        panick_policy.list_rules(),
         pause_server.list_rules(),
         pci.list_rules(),
         quota_class_sets.list_rules(),
@@ -202,6 +204,20 @@ def list_rules():
         virtual_interfaces.list_rules(),
         volumes.list_rules(),
         volumes_attachments.list_rules(),
+        wstvms.list_rules(),
+        wsthost.list_rules(),
+        cpu_priority.list_rules(),
         ics_hosts.list_rules(),
-        ics_vm.list_rules()
+        clusters.list_rules(),
+        drs.list_rules(),
+        cpu_qos.list_rules(),
+        mem_priority.list_rules(),
+        disk_qos.list_rules(),
+        hostnic.list_rules(),
+        ics_datastore.list_rules(),
+        panick_policy.list_rules(),
+        ics_vm.list_rules(),
+        monitorstatus.list_rules(),
+        mem_snapshots.list_rules()
+
     )

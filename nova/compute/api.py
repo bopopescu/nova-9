@@ -823,7 +823,135 @@ class API(base.Base):
                                          metadata, access_ip_v4, access_ip_v6,
                                          requested_networks, config_drive,
                                          auto_disk_config, reservation_id,
-                                         max_count, ics_node):
+                                         max_count):
+        """Verify all the input parameters regardless of the provisioning
+        strategy being performed.
+        """
+        if instance_type['disabled']:
+            raise exception.FlavorNotFound(flavor_id=instance_type['id'])
+
+        if user_data:
+            l = len(user_data)
+            if l > MAX_USERDATA_SIZE:
+                # NOTE(mikal): user_data is stored in a text column, and
+                # the database might silently truncate if its over length.
+                raise exception.InstanceUserDataTooLarge(
+                    length=l, maxsize=MAX_USERDATA_SIZE)
+
+            try:
+                base64utils.decode_as_bytes(user_data)
+            except (base64.binascii.Error, TypeError):
+                # TODO(harlowja): reduce the above exceptions caught to
+                # only type error once we get a new oslo.serialization
+                # release that captures and makes only one be output.
+                #
+                # We can eliminate the capture of `binascii.Error` when:
+                #
+                # https://review.openstack.org/#/c/418066/ is released.
+                raise exception.InstanceUserDataMalformed()
+
+        # When using Neutron, _check_requested_secgroups will translate and
+        # return any requested security group names to uuids.
+        security_groups = (
+            self._check_requested_secgroups(context, security_groups))
+
+        # Note:  max_count is the number of instances requested by the user,
+        # max_network_count is the maximum number of instances taking into
+        # account any network quotas
+        max_network_count = self._check_requested_networks(context,
+                                     requested_networks, max_count)
+
+        kernel_id, ramdisk_id = self._handle_kernel_and_ramdisk(
+                context, kernel_id, ramdisk_id, boot_meta)
+
+        config_drive = self._check_config_drive(config_drive)
+
+        if key_data is None and key_name is not None:
+            key_pair = objects.KeyPair.get_by_name(context,
+                                                   context.user_id,
+                                                   key_name)
+            key_data = key_pair.public_key
+        else:
+            key_pair = None
+
+        root_device_name = block_device.prepend_dev(
+                block_device.properties_root_device_name(
+                    boot_meta.get('properties', {})))
+
+        try:
+            image_meta = objects.ImageMeta.from_dict(boot_meta)
+        except ValueError as e:
+            # there must be invalid values in the image meta properties so
+            # consider this an invalid request
+            msg = _('Invalid image metadata. Error: %s') % six.text_type(e)
+            raise exception.InvalidRequest(msg)
+        numa_topology = hardware.numa_get_constraints(
+                instance_type, image_meta)
+
+        system_metadata = {}
+
+        # PCI requests come from two sources: instance flavor and
+        # requested_networks. The first call in below returns an
+        # InstancePCIRequests object which is a list of InstancePCIRequest
+        # objects. The second call in below creates an InstancePCIRequest
+        # object for each SR-IOV port, and append it to the list in the
+        # InstancePCIRequests object
+        pci_request_info = pci_request.get_pci_requests_from_flavor(
+            instance_type)
+        self.network_api.create_pci_requests_for_sriov_ports(context,
+            pci_request_info, requested_networks)
+
+        base_options = {
+            'reservation_id': reservation_id,
+            'image_ref': image_href,
+            'kernel_id': kernel_id or '',
+            'ramdisk_id': ramdisk_id or '',
+            'power_state': power_state.NOSTATE,
+            'vm_state': vm_states.BUILDING,
+            'config_drive': config_drive,
+            'user_id': context.user_id,
+            'project_id': context.project_id,
+            'instance_type_id': instance_type['id'],
+            'memory_mb': instance_type['memory_mb'],
+            'vcpus': instance_type['vcpus'],
+            'root_gb': instance_type['root_gb'],
+            'ephemeral_gb': instance_type['ephemeral_gb'],
+            'display_name': display_name,
+            'display_description': display_description,
+            'user_data': user_data,
+            'key_name': key_name,
+            'key_data': key_data,
+            'locked': False,
+            'metadata': metadata or {},
+            'access_ip_v4': access_ip_v4,
+            'access_ip_v6': access_ip_v6,
+            'availability_zone': availability_zone,
+            'root_device_name': root_device_name,
+            'progress': 0,
+            'pci_requests': pci_request_info,
+            'numa_topology': numa_topology,
+            'system_metadata': system_metadata}
+
+        options_from_image = self._inherit_properties_from_image(
+                boot_meta, auto_disk_config)
+
+        base_options.update(options_from_image)
+
+        # return the validated options and maximum number of instances allowed
+        # by the network quotas
+        return base_options, max_network_count, key_pair, security_groups
+
+    def _validate_and_build_base_options_ics(self, context, instance_type,
+                                         boot_meta, image_href, image_id,
+                                         kernel_id, ramdisk_id, display_name,
+                                         display_description, key_name,
+                                         key_data, security_groups,
+                                         availability_zone, user_data,
+                                         metadata, access_ip_v4, access_ip_v6,
+                                         requested_networks, config_drive,
+                                         auto_disk_config, reservation_id,
+                                         max_count, ics_node, cpuSocket,
+                                         cpuCore, vcpuPin, sshkey, guestosLabel):
         """Verify all the input parameters regardless of the provisioning
         strategy being performed.
         """
@@ -931,7 +1059,12 @@ class API(base.Base):
             'pci_requests': pci_request_info,
             'numa_topology': numa_topology,
             'system_metadata': system_metadata,
-            'ics_node': ics_node}
+            'ics_node': ics_node,
+            'cpuSocket': cpuSocket,
+            'cpuCore': cpuCore,
+            'vcpuPin': vcpuPin,
+            'sshkey': sshkey,
+            'guestosLabel': guestosLabel}
 
         options_from_image = self._inherit_properties_from_image(
                 boot_meta, auto_disk_config)
@@ -976,7 +1109,130 @@ class API(base.Base):
                 # Create an instance object, but do not store in db yet.
                 instance = objects.Instance(context=context)
                 instance.uuid = instance_uuid
+                instance.update(base_options)
+                instance.keypairs = objects.KeyPairList(objects=[])
+                if key_pair:
+                    instance.keypairs.objects.append(key_pair)
+                instance = self.create_db_entry_for_new_instance(context,
+                        instance_type, boot_meta, instance, security_groups,
+                        block_device_mapping, num_instances, i,
+                        shutdown_terminate, create_instance=False)
+                block_device_mapping = (
+                    self._bdm_validate_set_size_and_instance(context,
+                        instance, instance_type, block_device_mapping))
+
+                # NOTE(danms): BDMs are still not created, so we need to pass
+                # a clone and then reset them on our object after create so
+                # that they're still dirty for later in this process
+                build_request = objects.BuildRequest(context,
+                        instance=instance, instance_uuid=instance.uuid,
+                        project_id=instance.project_id,
+                        block_device_mappings=block_device_mapping.obj_clone())
+                build_request.create()
+                build_request.block_device_mappings = block_device_mapping
+
+                # Create an instance_mapping.  The null cell_mapping indicates
+                # that the instance doesn't yet exist in a cell, and lookups
+                # for it need to instead look for the RequestSpec.
+                # cell_mapping will be populated after scheduling, with a
+                # scheduling failure using the cell_mapping for the special
+                # cell0.
+                inst_mapping = objects.InstanceMapping(context=context)
+                inst_mapping.instance_uuid = instance_uuid
+                inst_mapping.project_id = context.project_id
+                inst_mapping.cell_mapping = None
+                inst_mapping.create()
+
+                instances_to_build.append(
+                    (req_spec, build_request, inst_mapping))
+
+                if instance_group:
+                    if check_server_group_quota:
+                        count = objects.Quotas.count(context,
+                                             'server_group_members',
+                                             instance_group,
+                                             context.user_id)
+                        try:
+                            objects.Quotas.limit_check(context,
+                                               server_group_members=count + 1)
+                        except exception.OverQuota:
+                            msg = _("Quota exceeded, too many servers in "
+                                    "group")
+                            raise exception.QuotaError(msg)
+
+                    members = objects.InstanceGroup.add_members(
+                        context, instance_group.uuid, [instance.uuid])
+                    # list of members added to servers group in this iteration
+                    # is needed to check quota of server group during add next
+                    # instance
+                    instance_group.members.extend(members)
+
+        # In the case of any exceptions, attempt DB cleanup and rollback the
+        # quota reservations.
+        except Exception:
+            with excutils.save_and_reraise_exception():
+                try:
+                    for rs, br, im in instances_to_build:
+                        try:
+                            rs.destroy()
+                        except exception.RequestSpecNotFound:
+                            pass
+                        try:
+                            im.destroy()
+                        except exception.InstanceMappingNotFound:
+                            pass
+                        try:
+                            br.destroy()
+                        except exception.BuildRequestNotFound:
+                            pass
+                finally:
+                    quotas.rollback()
+
+        # Commit the reservations
+        quotas.commit()
+
+        return instances_to_build
+
+    def _provision_ics_instances(self, context, instance_type, min_count,
+            max_count, base_options, boot_meta, security_groups,
+            block_device_mapping, shutdown_terminate,
+            instance_group, check_server_group_quota, filter_properties,
+            key_pair):
+        # Reserve quotas
+        num_instances, quotas = self._check_num_instances_quota(
+                context, instance_type, min_count, max_count)
+        security_groups = self.security_group_api.populate_security_groups(
+                security_groups)
+        self.security_group_api.ensure_default(context)
+        LOG.debug("Going to run %s instances...", num_instances)
+        instances_to_build = []
+        try:
+            for i in range(num_instances):
+                # Create a uuid for the instance so we can store the
+                # RequestSpec before the instance is created.
+                instance_uuid = uuidutils.generate_uuid()
+                # Store the RequestSpec that will be used for scheduling.
+                req_spec = objects.RequestSpec.from_components(context,
+                        instance_uuid, boot_meta, instance_type,
+                        base_options['numa_topology'],
+                        base_options['pci_requests'], filter_properties,
+                        instance_group, base_options['availability_zone'],
+                        security_groups=security_groups)
+                # NOTE(danms): We need to record num_instances on the request
+                # spec as this is how the conductor knows how many were in this
+                # batch.
+                req_spec.num_instances = num_instances
+                req_spec.create()
+
+                # Create an instance object, but do not store in db yet.
+                instance = objects.Instance(context=context)
+                instance.uuid = instance_uuid
                 instance.ics_node = base_options['ics_node']
+                instance.cpuSocket = base_options['cpuSocket']
+                instance.cpuCore = base_options['cpuCore']
+                instance.vcpuPin = base_options['vcpuPin']
+                instance.sshkey = base_options['sshkey']
+                instance.sshkey = base_options['guestosLabel']
                 instance.update(base_options)
                 instance.keypairs = objects.KeyPairList(objects=[])
                 if key_pair:
@@ -1153,7 +1409,7 @@ class API(base.Base):
                admin_password, access_ip_v4, access_ip_v6,
                requested_networks, config_drive,
                block_device_mapping, auto_disk_config, filter_properties,
-               reservation_id=None, ics_node=None,
+               reservation_id=None,
                legacy_bdm=True, shutdown_terminate=False,
                check_server_group_quota=False):
         """Verify all the input parameters regardless of the provisioning
@@ -1186,7 +1442,7 @@ class API(base.Base):
                     key_name, key_data, security_groups, availability_zone,
                     user_data, metadata, access_ip_v4, access_ip_v6,
                     requested_networks, config_drive, auto_disk_config,
-                    reservation_id, max_count, ics_node)
+                    reservation_id, max_count)
 
         # max_net_count is the maximum number of instances requested by the
         # user adjusted for any network quota constraints, including
@@ -1214,6 +1470,120 @@ class API(base.Base):
                                    filter_properties)
 
         instances_to_build = self._provision_instances(context, instance_type,
+                min_count, max_count, base_options, boot_meta, security_groups,
+                block_device_mapping, shutdown_terminate,
+                instance_group, check_server_group_quota, filter_properties,
+                key_pair)
+
+        instances = []
+        request_specs = []
+        build_requests = []
+        for rs, build_request, im in instances_to_build:
+            build_requests.append(build_request)
+            instance = build_request.get_new_instance(context)
+            instances.append(instance)
+            request_specs.append(rs)
+
+        if CONF.cells.enable:
+            # NOTE(danms): CellsV1 can't do the new thing, so we
+            # do the old thing here. We can remove this path once
+            # we stop supporting v1.
+            for instance in instances:
+                instance.create()
+            self.compute_task_api.build_instances(context,
+                instances=instances, image=boot_meta,
+                filter_properties=filter_properties,
+                admin_password=admin_password,
+                injected_files=injected_files,
+                requested_networks=requested_networks,
+                security_groups=security_groups,
+                block_device_mapping=block_device_mapping,
+                legacy_bdm=False)
+        else:
+            self.compute_task_api.schedule_and_build_instances(
+                context,
+                build_requests=build_requests,
+                request_spec=request_specs,
+                image=boot_meta,
+                admin_password=admin_password,
+                injected_files=injected_files,
+                requested_networks=requested_networks,
+                block_device_mapping=block_device_mapping)
+
+        return (instances, reservation_id)
+
+    def _create_icsvm(self, context, instance_type,
+               image_href, kernel_id, ramdisk_id,
+               min_count, max_count,
+               display_name, display_description,
+               key_name, key_data, security_groups,
+               availability_zone, user_data, metadata, injected_files,
+               admin_password, access_ip_v4, access_ip_v6,
+               requested_networks, config_drive,
+               block_device_mapping, auto_disk_config, filter_properties,
+               reservation_id=None, ics_node=None, cpuSocket = None,
+               cpuCore=None, vcpuPin=None, sshkey=None, guestosLabel = None,
+               legacy_bdm=True, shutdown_terminate=False,
+               check_server_group_quota=False):
+        """Verify all the input parameters regardless of the provisioning
+        strategy being performed and schedule the instance(s) for
+        creation.
+        """
+
+        # Normalize and setup some parameters
+        if reservation_id is None:
+            reservation_id = utils.generate_uid('r')
+        security_groups = security_groups or ['default']
+        min_count = min_count or 1
+        max_count = max_count or min_count
+        block_device_mapping = block_device_mapping or []
+
+        if image_href:
+            image_id, boot_meta = self._get_image(context, image_href)
+        else:
+            image_id = None
+            boot_meta = self._get_bdm_image_metadata(
+                context, block_device_mapping, legacy_bdm)
+
+        self._check_auto_disk_config(image=boot_meta,
+                                     auto_disk_config=auto_disk_config)
+
+        base_options, max_net_count, key_pair, security_groups = \
+                self._validate_and_build_base_options_ics(
+                    context, instance_type, boot_meta, image_href, image_id,
+                    kernel_id, ramdisk_id, display_name, display_description,
+                    key_name, key_data, security_groups, availability_zone,
+                    user_data, metadata, access_ip_v4, access_ip_v6,
+                    requested_networks, config_drive, auto_disk_config,
+                    reservation_id, max_count, ics_node, cpuSocket,
+                    cpuCore, vcpuPin, sshkey, guestosLabel)
+
+        # max_net_count is the maximum number of instances requested by the
+        # user adjusted for any network quota constraints, including
+        # consideration of connections to each requested network
+        if max_net_count < min_count:
+            raise exception.PortLimitExceeded()
+        elif max_net_count < max_count:
+            LOG.info(_LI("max count reduced from %(max_count)d to "
+                         "%(max_net_count)d due to network port quota"),
+                        {'max_count': max_count,
+                         'max_net_count': max_net_count})
+            max_count = max_net_count
+
+        block_device_mapping = self._check_and_transform_bdm(context,
+            base_options, instance_type, boot_meta, min_count, max_count,
+            block_device_mapping, legacy_bdm)
+
+        # We can't do this check earlier because we need bdms from all sources
+        # to have been merged in order to get the root bdm.
+        self._checks_for_create_and_rebuild(context, image_id, boot_meta,
+                instance_type, metadata, injected_files,
+                block_device_mapping.root_bdm())
+
+        instance_group = self._get_requested_instance_group(context,
+                                   filter_properties)
+
+        instances_to_build = self._provision_ics_instances(context, instance_type,
                 min_count, max_count, base_options, boot_meta, security_groups,
                 block_device_mapping, shutdown_terminate,
                 instance_group, check_server_group_quota, filter_properties,
@@ -1577,7 +1947,7 @@ class API(base.Base):
                key_name=None, key_data=None, security_groups=None,
                availability_zone=None, forced_host=None, forced_node=None,
                user_data=None, metadata=None, injected_files=None,
-               admin_password=None, block_device_mapping=None, ics_node=None,
+               admin_password=None, block_device_mapping=None,
                access_ip_v4=None, access_ip_v6=None, requested_networks=None,
                config_drive=None, auto_disk_config=None, scheduler_hints=None,
                legacy_bdm=True, shutdown_terminate=False,
@@ -1617,7 +1987,64 @@ class API(base.Base):
                        access_ip_v4, access_ip_v6,
                        requested_networks, config_drive,
                        block_device_mapping, auto_disk_config,
-                       ics_node=ics_node,
+                       filter_properties=filter_properties,
+                       legacy_bdm=legacy_bdm,
+                       shutdown_terminate=shutdown_terminate,
+                       check_server_group_quota=check_server_group_quota)
+
+    @hooks.add_hook("create_instance")
+    def createIcsVm(self, context, instance_type,
+               image_href, kernel_id=None, ramdisk_id=None,
+               min_count=None, max_count=None,
+               display_name=None, display_description=None,
+               key_name=None, key_data=None, security_groups=None,
+               availability_zone=None, forced_host=None, forced_node=None,
+               user_data=None, metadata=None, injected_files=None,
+               admin_password=None, block_device_mapping=None, ics_node=None,
+               cpuSocket = None, cpuCore=None, vcpuPin=None, sshkey=None,
+               guestosLabel =None, access_ip_v4=None,
+               access_ip_v6=None, requested_networks=None,
+               config_drive=None, auto_disk_config=None, scheduler_hints=None,
+               legacy_bdm=True, shutdown_terminate=False,
+               check_server_group_quota=False):
+        """Provision instances, sending instance information to the
+        scheduler.  The scheduler will determine where the instance(s)
+        go and will handle creating the DB entries.
+
+        Returns a tuple of (instances, reservation_id)
+        """
+        if requested_networks and max_count is not None and max_count > 1:
+            self._check_multiple_instances_with_specified_ip(
+                requested_networks)
+            if utils.is_neutron():
+                self._check_multiple_instances_with_neutron_ports(
+                    requested_networks)
+
+        if availability_zone:
+            available_zones = availability_zones.\
+                get_availability_zones(context.elevated(), True)
+            if forced_host is None and availability_zone not in \
+                    available_zones:
+                msg = _('The requested availability zone is not available')
+                raise exception.InvalidRequest(msg)
+
+        filter_properties = scheduler_utils.build_filter_properties(
+                scheduler_hints, forced_host, forced_node, instance_type)
+
+        return self._create_icsvm(
+                       context, instance_type,
+                       image_href, kernel_id, ramdisk_id,
+                       min_count, max_count,
+                       display_name, display_description,
+                       key_name, key_data, security_groups,
+                       availability_zone, user_data, metadata,
+                       injected_files, admin_password,
+                       access_ip_v4, access_ip_v6,
+                       requested_networks, config_drive,
+                       block_device_mapping, auto_disk_config,
+                       ics_node=ics_node, cpuSocket=cpuSocket,
+                       cpuCore=cpuCore, vcpuPin=vcpuPin, sshkey=sshkey,
+                       guestosLabel=guestosLabel,
                        filter_properties=filter_properties,
                        legacy_bdm=legacy_bdm,
                        shutdown_terminate=shutdown_terminate,
@@ -3208,11 +3635,12 @@ class API(base.Base):
         else:
             new_instance_type = flavors.get_flavor_by_flavor_id(
                     flavor_id, read_deleted="no")
-            if (new_instance_type.get('root_gb') == 0 and
-                current_instance_type.get('root_gb') != 0 and
+            new_instance_root_gb = new_instance_type.get('root_gb') 
+            current_instance_root_gb = current_instance_type.get('root_gb')
+            if (new_instance_root_gb < current_instance_root_gb and
                 not compute_utils.is_volume_backed_instance(context,
                     instance)):
-                reason = _('Resize to zero disk flavor is not allowed.')
+                reason = _('Resize to smaller disk flavor is not allowed.')
                 raise exception.CannotResizeDisk(reason=reason)
 
         if not new_instance_type:
@@ -3357,11 +3785,12 @@ class API(base.Base):
             LOG.debug("flavor_id is %s" % flavor_id)
             new_instance_type = flavors.get_flavor_by_flavor_id(
                     flavor_id, read_deleted="no")
-            if (new_instance_type.get('root_gb') == 0 and
-                current_instance_type.get('root_gb') != 0 and
+            new_instance_root_gb = new_instance_type.get('root_gb') 
+            current_instance_root_gb = current_instance_type.get('root_gb')
+            if (new_instance_root_gb < current_instance_root_gb and
                 not compute_utils.is_volume_backed_instance(context,
                     instance)):
-                reason = _('Resize to zero disk flavor is not allowed.')
+                reason = _('Resize to smaller disk flavor is not allowed.')
                 raise exception.CannotResizeDisk(reason=reason)
 
         if not new_instance_type:

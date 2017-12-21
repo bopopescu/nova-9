@@ -29,6 +29,7 @@ rules = [
     # the details in host_status are pretty sensitive, only admins
     # should do that by default.
     policy.RuleDefault(SERVERS % 'show:host_status', base.RULE_ADMIN_API),
+    policy.RuleDefault(SERVERS % 'createIcsVm', RULE_AOO),
     policy.RuleDefault(SERVERS % 'create', RULE_AOO),
     policy.RuleDefault(SERVERS % 'create:forced_host', base.RULE_ADMIN_API),
     policy.RuleDefault(SERVERS % 'create:attach_volume', RULE_AOO),
